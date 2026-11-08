@@ -21,6 +21,7 @@ export type IconName =
   | "activity"
   | "map-pin"
   | "clock"
+  | "search"
   | "sparkles";
 
 const iconArtwork: Record<IconName, ReactNode> = {
@@ -119,6 +120,12 @@ const iconArtwork: Record<IconName, ReactNode> = {
     <>
       <circle cx="12" cy="12" r="9" />
       <path d="M12 7v5l3 2" />
+    </>
+  ),
+  search: (
+    <>
+      <circle cx="11" cy="11" r="7" />
+      <path d="m20 20-4-4" />
     </>
   ),
   sparkles: (

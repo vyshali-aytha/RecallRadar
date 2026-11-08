@@ -7,7 +7,7 @@ import type {
   TextareaHTMLAttributes,
 } from "react";
 
-type ButtonVariant = "primary" | "secondary" | "ghost" | "outline";
+type ButtonVariant = "primary" | "secondary" | "ghost" | "outline" | "danger";
 type ButtonSize = "sm" | "md";
 
 type ButtonProps = ButtonHTMLAttributes<HTMLButtonElement> & {
@@ -24,6 +24,8 @@ const buttonVariants: Record<ButtonVariant, string> = {
     "bg-transparent text-ink hover:bg-stone-100 focus-visible:outline-forest",
   outline:
     "border border-line bg-white text-ink hover:bg-stone-50 focus-visible:outline-forest",
+  danger:
+    "bg-red-700 text-white shadow-sm hover:bg-red-800 focus-visible:outline-red-700",
 };
 
 const buttonSizes: Record<ButtonSize, string> = {

@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import type { ReactNode } from "react";
 import { AppShell } from "@/components/layout/app-shell";
+import { MockDataProvider } from "@/lib/mock-data";
 import "./globals.css";
 
 export const metadata: Metadata = {
@@ -16,7 +17,9 @@ export default function RootLayout({ children }: { children: ReactNode }) {
   return (
     <html lang="en" className="h-full antialiased">
       <body className="min-h-full">
-        <AppShell>{children}</AppShell>
+        <MockDataProvider>
+          <AppShell>{children}</AppShell>
+        </MockDataProvider>
       </body>
     </html>
   );

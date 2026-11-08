@@ -29,7 +29,7 @@ type ActiveDialog =
 const emptyDraft: ComponentDraft = { name: "", category: "", supplier_id: "" };
 
 export default function ComponentsPage() {
-  const { suppliers, components, bomEntries, componentBatches, addComponent, updateComponent, deleteComponent } = useMockData();
+  const { suppliers, components, bomEntries, componentBatches, recalls, addComponent, updateComponent, deleteComponent } = useMockData();
   const [query, setQuery] = useState("");
   const [categoryFilter, setCategoryFilter] = useState("all");
   const [activeDialog, setActiveDialog] = useState<ActiveDialog>(null);
@@ -64,10 +64,15 @@ export default function ComponentsPage() {
   const linkedBatches = activeDialog?.kind === "delete"
     ? componentBatches.filter((batch) => batch.component_id === activeDialog.id)
     : [];
+  const linkedRecalls = activeDialog?.kind === "delete"
+    ? recalls.filter((recall) => recall.component_id === activeDialog.id)
+    : [];
   const blockedReason = linkedBom.length > 0
     ? "This component is used in a product BOM. Remove its BOM entries before deleting the component."
     : linkedBatches.length > 0
       ? "This component has supplier batches. Remove those batches before deleting the component."
+      : linkedRecalls.length > 0
+        ? "A recall targets this component. Resolve or reassign those recalls before deleting it."
       : undefined;
 
   function openCreate() {
@@ -116,7 +121,7 @@ export default function ComponentsPage() {
 
   function confirmDelete() {
     if (activeDialog?.kind !== "delete" || blockedReason || !selectedComponent) return;
-    deleteComponent(selectedComponent.component_id);
+    if (!deleteComponent(selectedComponent.component_id)) return;
     setNotice(`${selectedComponent.name} was removed from mock data.`);
     setActiveDialog(null);
   }

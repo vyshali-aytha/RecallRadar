@@ -87,6 +87,32 @@ export type Shipment = {
   product_batch_id: number;
 };
 
+export type MockAppUser = {
+  user_id: number;
+  name: string;
+  email: string;
+  role: string;
+};
+
+export type RecallRecord = {
+  recall_id: number;
+  recall_date: string;
+  reason: string | null;
+  severity: string | null;
+  status: string;
+  user_id: number;
+  component_id: number | null;
+  component_batch_id: number | null;
+};
+
+export type RecallImpactRecord = {
+  recall_impact_id: number;
+  identified_date: string;
+  impact_type: string;
+  recall_id: number;
+  product_batch_id: number;
+};
+
 type SupplierInput = Omit<Supplier, "supplier_id">;
 type ProductInput = Omit<Product, "product_id">;
 type ComponentInput = Omit<ComponentRecord, "component_id">;
@@ -109,6 +135,9 @@ type MockDataContextValue = {
   inventoryRecords: InventoryRecord[];
   distributors: Distributor[];
   shipments: Shipment[];
+  appUsers: MockAppUser[];
+  recalls: RecallRecord[];
+  recallImpacts: RecallImpactRecord[];
   addSupplier: (record: SupplierInput) => Supplier;
   updateSupplier: (id: number, record: SupplierInput) => void;
   deleteSupplier: (id: number) => void;
@@ -117,13 +146,13 @@ type MockDataContextValue = {
   deleteProduct: (id: number) => void;
   addComponent: (record: ComponentInput) => ComponentRecord;
   updateComponent: (id: number, record: ComponentInput) => void;
-  deleteComponent: (id: number) => void;
+  deleteComponent: (id: number) => boolean;
   addBomEntry: (record: BomEntry) => void;
   updateBomEntry: (productId: number, componentId: number, quantity: number) => void;
   deleteBomEntry: (productId: number, componentId: number) => void;
   addComponentBatch: (record: ComponentBatchInput) => ComponentBatch;
   updateComponentBatch: (id: number, record: ComponentBatchInput) => void;
-  deleteComponentBatch: (id: number) => void;
+  deleteComponentBatch: (id: number) => boolean;
   addProductBatch: (record: ProductBatchInput) => ProductBatch;
   updateProductBatch: (id: number, record: ProductBatchInput) => void;
   deleteProductBatch: (id: number) => void;
@@ -142,6 +171,10 @@ type MockDataContextValue = {
   addShipment: (record: ShipmentInput) => Shipment;
   updateShipment: (id: number, record: ShipmentInput) => void;
   deleteShipment: (id: number) => void;
+  addRecall: (record: Omit<RecallRecord, "recall_id">) => RecallRecord;
+  updateRecall: (id: number, record: Omit<RecallRecord, "recall_id">) => void;
+  deleteRecall: (id: number) => boolean;
+  deleteMockUser: (id: number) => boolean;
 };
 
 const initialSuppliers: Supplier[] = [
@@ -317,6 +350,25 @@ const initialShipments: Shipment[] = [
   { shipment_id: 3, shipment_date: "2026-10-28", quantity_shipped: 12, status: "pending", distributor_id: 1, product_batch_id: 3 },
 ];
 
+// Display-safe temporary app_user fixtures; password_hash is intentionally not held in frontend mock data.
+const initialAppUsers: MockAppUser[] = [
+  { user_id: 1, name: "Jordan Lee · Mock QA Manager", email: "jordan.lee@example.test", role: "quality_manager" },
+  { user_id: 2, name: "Sam Rivera · Mock Recall Coordinator", email: "sam.rivera@example.test", role: "recall_coordinator" },
+  { user_id: 3, name: "Taylor Morgan · Mock Administrator", email: "taylor.morgan@example.test", role: "admin" },
+];
+
+const initialRecalls: RecallRecord[] = [
+  { recall_id: 1, recall_date: "2026-11-02", reason: "Temperature sensor readings drifted outside the validated tolerance during inspection.", severity: "high", status: "open", user_id: 1, component_id: 1, component_batch_id: 1 },
+  { recall_id: 2, recall_date: "2026-10-18", reason: "A connector supplier issued a field safety notice pending further investigation.", severity: "medium", status: "in_progress", user_id: 2, component_id: 3, component_batch_id: null },
+  { recall_id: 3, recall_date: "2026-09-09", reason: null, severity: null, status: "closed", user_id: 1, component_id: null, component_batch_id: 4 },
+];
+
+const initialRecallImpacts: RecallImpactRecord[] = [
+  { recall_impact_id: 1, identified_date: "2026-11-03", impact_type: "Affected production batch", recall_id: 1, product_batch_id: 1 },
+  { recall_impact_id: 2, identified_date: "2026-11-04", impact_type: "Downstream review required", recall_id: 1, product_batch_id: 2 },
+  { recall_impact_id: 3, identified_date: "2026-10-19", impact_type: "Potentially affected", recall_id: 2, product_batch_id: 3 },
+];
+
 function nextId<T>(records: T[], getId: (record: T) => number) {
   return records.reduce((highest, record) => Math.max(highest, getId(record)), 0) + 1;
 }
@@ -335,6 +387,9 @@ export function MockDataProvider({ children }: { children: ReactNode }) {
   const [inventoryRecords, setInventoryRecords] = useState(initialInventoryRecords);
   const [distributors, setDistributors] = useState(initialDistributors);
   const [shipments, setShipments] = useState(initialShipments);
+  const [appUsers, setAppUsers] = useState(initialAppUsers);
+  const [recalls, setRecalls] = useState(initialRecalls);
+  const [recallImpacts, setRecallImpacts] = useState(initialRecallImpacts);
 
   const value: MockDataContextValue = {
     suppliers,
@@ -348,6 +403,9 @@ export function MockDataProvider({ children }: { children: ReactNode }) {
     inventoryRecords,
     distributors,
     shipments,
+    appUsers,
+    recalls,
+    recallImpacts,
     addSupplier: (record) => {
       const created = { ...record, supplier_id: nextId(suppliers, (item) => item.supplier_id) };
       setSuppliers((current) => [...current, created]);
@@ -374,7 +432,11 @@ export function MockDataProvider({ children }: { children: ReactNode }) {
     updateComponent: (id, record) => {
       setComponents((current) => current.map((item) => item.component_id === id ? { ...record, component_id: id } : item));
     },
-    deleteComponent: (id) => setComponents((current) => current.filter((item) => item.component_id !== id)),
+    deleteComponent: (id) => {
+      if (bomEntries.some((item) => item.component_id === id) || componentBatches.some((item) => item.component_id === id) || recalls.some((item) => item.component_id === id)) return false;
+      setComponents((current) => current.filter((item) => item.component_id !== id));
+      return true;
+    },
     addBomEntry: (record) => setBomEntries((current) => [...current, record]),
     updateBomEntry: (productId, componentId, quantity) => {
       setBomEntries((current) => current.map((item) =>
@@ -396,7 +458,11 @@ export function MockDataProvider({ children }: { children: ReactNode }) {
     updateComponentBatch: (id, record) => {
       setComponentBatches((current) => current.map((item) => item.component_batch_id === id ? { ...record, component_batch_id: id } : item));
     },
-    deleteComponentBatch: (id) => setComponentBatches((current) => current.filter((item) => item.component_batch_id !== id)),
+    deleteComponentBatch: (id) => {
+      if (batchCompositions.some((item) => item.component_batch_id === id) || recalls.some((item) => item.component_batch_id === id)) return false;
+      setComponentBatches((current) => current.filter((item) => item.component_batch_id !== id));
+      return true;
+    },
     addProductBatch: (record) => {
       const created = { ...record, product_batch_id: nextId(productBatches, (item) => item.product_batch_id) };
       setProductBatches((current) => [...current, created]);
@@ -480,6 +546,22 @@ export function MockDataProvider({ children }: { children: ReactNode }) {
       setShipments((current) => current.map((item) => item.shipment_id === id ? { ...record, shipment_id: id } : item));
     },
     deleteShipment: (id) => setShipments((current) => current.filter((item) => item.shipment_id !== id)),
+    addRecall: (record) => {
+      const created = { ...record, recall_id: nextId(recalls, (item) => item.recall_id) };
+      setRecalls((current) => [...current, created]);
+      return created;
+    },
+    updateRecall: (id, record) => setRecalls((current) => current.map((item) => item.recall_id === id ? { ...record, recall_id: id } : item)),
+    deleteRecall: (id) => {
+      if (recallImpacts.some((item) => item.recall_id === id)) return false;
+      setRecalls((current) => current.filter((item) => item.recall_id !== id));
+      return true;
+    },
+    deleteMockUser: (id) => {
+      if (recalls.some((item) => item.user_id === id)) return false;
+      setAppUsers((current) => current.filter((item) => item.user_id !== id));
+      return true;
+    },
   };
 
   return <MockDataContext.Provider value={value}>{children}</MockDataContext.Provider>;

@@ -39,7 +39,7 @@ const emptyDraft: ComponentBatchDraft = {
 };
 
 export function ComponentBatchesSection() {
-  const { components, componentBatches, batchCompositions, addComponentBatch, updateComponentBatch, deleteComponentBatch } = useMockData();
+  const { components, componentBatches, batchCompositions, recalls, addComponentBatch, updateComponentBatch, deleteComponentBatch } = useMockData();
   const [query, setQuery] = useState("");
   const [componentFilter, setComponentFilter] = useState("all");
   const [statusFilter, setStatusFilter] = useState("all");
@@ -68,8 +68,13 @@ export function ComponentBatchesSection() {
   const linkedCompositions = activeDialog?.kind === "delete"
     ? batchCompositions.filter((entry) => entry.component_batch_id === activeDialog.id)
     : [];
+  const linkedRecalls = activeDialog?.kind === "delete"
+    ? recalls.filter((recall) => recall.component_batch_id === activeDialog.id)
+    : [];
   const blockedReason = linkedCompositions.length > 0
     ? "This component batch is used in product batch composition. Remove those composition entries before deleting it."
+    : linkedRecalls.length > 0
+      ? "A recall targets this component batch. Resolve or reassign those recalls before deleting it."
     : undefined;
 
   function openCreate() {
@@ -138,7 +143,7 @@ export function ComponentBatchesSection() {
 
   function confirmDelete() {
     if (activeDialog?.kind !== "delete" || blockedReason || !selectedBatch) return;
-    deleteComponentBatch(selectedBatch.component_batch_id);
+    if (!deleteComponentBatch(selectedBatch.component_batch_id)) return;
     setNotice(`${selectedBatch.batch_number} was removed from mock data.`);
     setActiveDialog(null);
   }

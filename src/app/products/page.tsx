@@ -32,6 +32,7 @@ export default function ProductsPage() {
   const {
     products,
     components,
+    productBatches,
     bomEntries,
     addProduct,
     updateProduct,
@@ -77,9 +78,14 @@ export default function ProductsPage() {
   const linkedBom = activeDialog?.kind === "delete"
     ? bomEntries.filter((entry) => entry.product_id === activeDialog.id)
     : [];
+  const linkedBatches = activeDialog?.kind === "delete"
+    ? productBatches.filter((batch) => batch.product_id === activeDialog.id)
+    : [];
   const blockedReason = linkedBom.length > 0
     ? "This product has Bill of Materials entries. Remove those component relationships from the product details before deleting the product."
-    : undefined;
+    : linkedBatches.length > 0
+      ? "This product has production batches. Remove those batches before deleting the product."
+      : undefined;
   const availableComponents = activeDialog?.kind === "view"
     ? components.filter((component) => !selectedBom.some((entry) => entry.component_id === component.component_id))
     : [];

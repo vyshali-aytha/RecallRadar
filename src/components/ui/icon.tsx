@@ -22,6 +22,8 @@ export type IconName =
   | "map-pin"
   | "clock"
   | "search"
+  | "pencil"
+  | "trash"
   | "sparkles";
 
 const iconArtwork: Record<IconName, ReactNode> = {
@@ -128,6 +130,8 @@ const iconArtwork: Record<IconName, ReactNode> = {
       <path d="m20 20-4-4" />
     </>
   ),
+  pencil: <path d="m16 4 4 4M4 20l4.5-1 10-10a2.12 2.12 0 0 0-3-3l-10 10L4 20Z" />,
+  trash: <path d="M3 6h18M8 6V4h8v2m3 0-1 14H6L5 6m4 4v6m6-6v6" />,
   sparkles: (
     <>
       <path d="m12 3 1.8 5.2L19 10l-5.2 1.8L12 17l-1.8-5.2L5 10l5.2-1.8L12 3Z" />

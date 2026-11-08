@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 
+import { requireRecallImpactAccess } from '@/lib/auth';
 import { getRecallImpact } from '@/lib/recall-impact';
 
 export async function GET(
@@ -7,6 +8,8 @@ export async function GET(
   { params }: { params: Promise<{ recallId: string }> }
 ) {
   try {
+    await requireRecallImpactAccess();
+
     const { recallId } = await params;
     const parsedId = Number(recallId);
 
@@ -22,7 +25,7 @@ export async function GET(
 
     const result = await getRecallImpact(parsedId);
 
-    if (result.error && result.recall === null) {
+    if (result.error) {
       return NextResponse.json(
         {
           success: false,
@@ -33,17 +36,23 @@ export async function GET(
     }
 
     return NextResponse.json(result, {
-      status: result.error ? 500 : 200,
+      status: 200,
     });
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Unexpected error';
+    const status =
+      message.includes('Authentication required') || message.includes('unauthorized')
+        ? 401
+        : message.includes('Insufficient role permissions') || message.includes('forbidden')
+          ? 403
+          : 500;
 
     return NextResponse.json(
       {
         success: false,
         error: message,
       },
-      { status: 500 }
+      { status }
     );
   }
 }

@@ -1,5 +1,6 @@
 import 'server-only';
 
+import { requireRecallImpactAccess } from './auth';
 import { pool } from './db';
 import driver from './neo4j';
 
@@ -149,6 +150,8 @@ async function fetchBatchDetails(productBatchIds: number[]) {
 }
 
 export async function getRecallImpact(recallId: number): Promise<RecallImpactResult> {
+  await requireRecallImpactAccess();
+
   if (!Number.isInteger(recallId) || recallId <= 0) {
     return {
       recallId,

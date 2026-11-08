@@ -37,7 +37,7 @@ const emptyDraft: ProductBatchDraft = {
 };
 
 export function ProductBatchesSection() {
-  const { products, productBatches, batchCompositions, addProductBatch, updateProductBatch, deleteProductBatch } = useMockData();
+  const { products, productBatches, batchCompositions, inventoryRecords, shipments, addProductBatch, updateProductBatch, deleteProductBatch } = useMockData();
   const [query, setQuery] = useState("");
   const [productFilter, setProductFilter] = useState("all");
   const [statusFilter, setStatusFilter] = useState("all");
@@ -66,9 +66,15 @@ export function ProductBatchesSection() {
   const linkedCompositions = activeDialog?.kind === "delete"
     ? batchCompositions.filter((entry) => entry.product_batch_id === activeDialog.id)
     : [];
+  const referencedByInventory = activeDialog?.kind === "delete" && inventoryRecords.some((entry) => entry.product_batch_id === activeDialog.id);
+  const referencedByShipment = activeDialog?.kind === "delete" && shipments.some((entry) => entry.product_batch_id === activeDialog.id);
   const blockedReason = linkedCompositions.length > 0
     ? "This product batch has component composition entries. Remove those entries before deleting the product batch."
-    : undefined;
+    : referencedByInventory
+      ? "This product batch is referenced by inventory records. Remove those records before deleting the product batch."
+      : referencedByShipment
+        ? "This product batch is referenced by shipments. Remove those shipments before deleting the product batch."
+        : undefined;
 
   function openCreate() {
     setDraft({ ...emptyDraft, product_id: products[0] ? String(products[0].product_id) : "" });

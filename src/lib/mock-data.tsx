@@ -56,11 +56,46 @@ export type BatchComposition = {
   quantity_used: number;
 };
 
+export type InventoryLocation = {
+  location_id: number;
+  name: string;
+  type: string | null;
+  address: string | null;
+};
+
+export type InventoryRecord = {
+  inventory_id: number;
+  quantity_on_hand: number;
+  last_updated: string;
+  product_batch_id: number;
+  location_id: number;
+};
+
+export type Distributor = {
+  distributor_id: number;
+  name: string;
+  region: string | null;
+  contact_email: string | null;
+};
+
+export type Shipment = {
+  shipment_id: number;
+  shipment_date: string | null;
+  quantity_shipped: number;
+  status: string;
+  distributor_id: number;
+  product_batch_id: number;
+};
+
 type SupplierInput = Omit<Supplier, "supplier_id">;
 type ProductInput = Omit<Product, "product_id">;
 type ComponentInput = Omit<ComponentRecord, "component_id">;
 type ComponentBatchInput = Omit<ComponentBatch, "component_batch_id">;
 type ProductBatchInput = Omit<ProductBatch, "product_batch_id">;
+type InventoryLocationInput = Omit<InventoryLocation, "location_id">;
+type InventoryInput = Omit<InventoryRecord, "inventory_id" | "last_updated">;
+type DistributorInput = Omit<Distributor, "distributor_id">;
+type ShipmentInput = Omit<Shipment, "shipment_id">;
 
 type MockDataContextValue = {
   suppliers: Supplier[];
@@ -70,6 +105,10 @@ type MockDataContextValue = {
   componentBatches: ComponentBatch[];
   productBatches: ProductBatch[];
   batchCompositions: BatchComposition[];
+  inventoryLocations: InventoryLocation[];
+  inventoryRecords: InventoryRecord[];
+  distributors: Distributor[];
+  shipments: Shipment[];
   addSupplier: (record: SupplierInput) => Supplier;
   updateSupplier: (id: number, record: SupplierInput) => void;
   deleteSupplier: (id: number) => void;
@@ -91,6 +130,18 @@ type MockDataContextValue = {
   addBatchComposition: (record: BatchComposition) => boolean;
   updateBatchComposition: (productBatchId: number, componentBatchId: number, quantity: number) => void;
   deleteBatchComposition: (productBatchId: number, componentBatchId: number) => void;
+  addInventoryLocation: (record: InventoryLocationInput) => InventoryLocation;
+  updateInventoryLocation: (id: number, record: InventoryLocationInput) => void;
+  deleteInventoryLocation: (id: number) => void;
+  addInventoryRecord: (record: InventoryInput) => boolean;
+  updateInventoryRecord: (id: number, record: InventoryInput) => boolean;
+  deleteInventoryRecord: (id: number) => void;
+  addDistributor: (record: DistributorInput) => Distributor;
+  updateDistributor: (id: number, record: DistributorInput) => void;
+  deleteDistributor: (id: number) => void;
+  addShipment: (record: ShipmentInput) => Shipment;
+  updateShipment: (id: number, record: ShipmentInput) => void;
+  deleteShipment: (id: number) => void;
 };
 
 const initialSuppliers: Supplier[] = [
@@ -227,6 +278,45 @@ const initialBatchCompositions: BatchComposition[] = [
   { product_batch_id: 3, component_batch_id: 3, quantity_used: 40 },
 ];
 
+const initialInventoryLocations: InventoryLocation[] = [
+  {
+    location_id: 1,
+    name: "FrostGuard Finished Goods Warehouse",
+    type: "warehouse",
+    address: "500 Industrial Way, San Jose, CA",
+  },
+  {
+    location_id: 2,
+    name: "West Coast Cold Storage",
+    type: "cold_storage",
+    address: "2400 Harbor Road, Oakland, CA",
+  },
+  {
+    location_id: 3,
+    name: "Returns Inspection Bay",
+    type: "inspection",
+    address: "16 Meridian Loop, San Jose, CA",
+  },
+];
+
+const initialInventoryRecords: InventoryRecord[] = [
+  { inventory_id: 1, quantity_on_hand: 80, last_updated: "2026-11-08 16:20:00", product_batch_id: 1, location_id: 1 },
+  { inventory_id: 2, quantity_on_hand: 42, last_updated: "2026-11-08 14:05:00", product_batch_id: 2, location_id: 2 },
+  { inventory_id: 3, quantity_on_hand: 28, last_updated: "2026-11-08 12:40:00", product_batch_id: 3, location_id: 1 },
+];
+
+const initialDistributors: Distributor[] = [
+  { distributor_id: 1, name: "ArcticLink Medical Distribution", region: "Western US", contact_email: "receiving@arcticlink.example" },
+  { distributor_id: 2, name: "Northstar Health Logistics", region: "Northwest", contact_email: "dispatch@northstarhealth.example" },
+  { distributor_id: 3, name: "Summit Clinical Freight", region: "Western US", contact_email: "care@summitfreight.example" },
+];
+
+const initialShipments: Shipment[] = [
+  { shipment_id: 1, shipment_date: "2026-10-20", quantity_shipped: 40, status: "delivered", distributor_id: 1, product_batch_id: 1 },
+  { shipment_id: 2, shipment_date: "2026-10-24", quantity_shipped: 18, status: "in_transit", distributor_id: 2, product_batch_id: 2 },
+  { shipment_id: 3, shipment_date: "2026-10-28", quantity_shipped: 12, status: "pending", distributor_id: 1, product_batch_id: 3 },
+];
+
 function nextId<T>(records: T[], getId: (record: T) => number) {
   return records.reduce((highest, record) => Math.max(highest, getId(record)), 0) + 1;
 }
@@ -241,6 +331,10 @@ export function MockDataProvider({ children }: { children: ReactNode }) {
   const [componentBatches, setComponentBatches] = useState(initialComponentBatches);
   const [productBatches, setProductBatches] = useState(initialProductBatches);
   const [batchCompositions, setBatchCompositions] = useState(initialBatchCompositions);
+  const [inventoryLocations, setInventoryLocations] = useState(initialInventoryLocations);
+  const [inventoryRecords, setInventoryRecords] = useState(initialInventoryRecords);
+  const [distributors, setDistributors] = useState(initialDistributors);
+  const [shipments, setShipments] = useState(initialShipments);
 
   const value: MockDataContextValue = {
     suppliers,
@@ -250,6 +344,10 @@ export function MockDataProvider({ children }: { children: ReactNode }) {
     componentBatches,
     productBatches,
     batchCompositions,
+    inventoryLocations,
+    inventoryRecords,
+    distributors,
+    shipments,
     addSupplier: (record) => {
       const created = { ...record, supplier_id: nextId(suppliers, (item) => item.supplier_id) };
       setSuppliers((current) => [...current, created]);
@@ -329,9 +427,67 @@ export function MockDataProvider({ children }: { children: ReactNode }) {
         item.product_batch_id !== productBatchId || item.component_batch_id !== componentBatchId,
       ));
     },
+    addInventoryLocation: (record) => {
+      const created = { ...record, location_id: nextId(inventoryLocations, (item) => item.location_id) };
+      setInventoryLocations((current) => [...current, created]);
+      return created;
+    },
+    updateInventoryLocation: (id, record) => {
+      setInventoryLocations((current) => current.map((item) => item.location_id === id ? { ...record, location_id: id } : item));
+    },
+    deleteInventoryLocation: (id) => setInventoryLocations((current) => current.filter((item) => item.location_id !== id)),
+    addInventoryRecord: (record) => {
+      const exists = inventoryRecords.some((item) =>
+        item.product_batch_id === record.product_batch_id && item.location_id === record.location_id,
+      );
+      if (exists) return false;
+      const created: InventoryRecord = {
+        ...record,
+        inventory_id: nextId(inventoryRecords, (item) => item.inventory_id),
+        last_updated: formatMockTimestamp(new Date()),
+      };
+      setInventoryRecords((current) => [...current, created]);
+      return true;
+    },
+    updateInventoryRecord: (id, record) => {
+      const duplicate = inventoryRecords.some((item) =>
+        item.inventory_id !== id &&
+        item.product_batch_id === record.product_batch_id &&
+        item.location_id === record.location_id,
+      );
+      if (duplicate) return false;
+      setInventoryRecords((current) => current.map((item) =>
+        item.inventory_id === id ? { ...record, inventory_id: id, last_updated: item.last_updated } : item,
+      ));
+      return true;
+    },
+    deleteInventoryRecord: (id) => setInventoryRecords((current) => current.filter((item) => item.inventory_id !== id)),
+    addDistributor: (record) => {
+      const created = { ...record, distributor_id: nextId(distributors, (item) => item.distributor_id) };
+      setDistributors((current) => [...current, created]);
+      return created;
+    },
+    updateDistributor: (id, record) => {
+      setDistributors((current) => current.map((item) => item.distributor_id === id ? { ...record, distributor_id: id } : item));
+    },
+    deleteDistributor: (id) => setDistributors((current) => current.filter((item) => item.distributor_id !== id)),
+    addShipment: (record) => {
+      const created = { ...record, shipment_id: nextId(shipments, (item) => item.shipment_id) };
+      setShipments((current) => [...current, created]);
+      return created;
+    },
+    updateShipment: (id, record) => {
+      setShipments((current) => current.map((item) => item.shipment_id === id ? { ...record, shipment_id: id } : item));
+    },
+    deleteShipment: (id) => setShipments((current) => current.filter((item) => item.shipment_id !== id)),
   };
 
   return <MockDataContext.Provider value={value}>{children}</MockDataContext.Provider>;
+}
+
+function formatMockTimestamp(date: Date) {
+  const pad = (value: number) => String(value).padStart(2, "0");
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())} ${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}`;
 }
 
 export function useMockData() {

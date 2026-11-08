@@ -155,7 +155,7 @@ type MockDataContextValue = {
   deleteComponentBatch: (id: number) => boolean;
   addProductBatch: (record: ProductBatchInput) => ProductBatch;
   updateProductBatch: (id: number, record: ProductBatchInput) => void;
-  deleteProductBatch: (id: number) => void;
+  deleteProductBatch: (id: number) => boolean;
   addBatchComposition: (record: BatchComposition) => boolean;
   updateBatchComposition: (productBatchId: number, componentBatchId: number, quantity: number) => void;
   deleteBatchComposition: (productBatchId: number, componentBatchId: number) => void;
@@ -175,6 +175,9 @@ type MockDataContextValue = {
   updateRecall: (id: number, record: Omit<RecallRecord, "recall_id">) => void;
   deleteRecall: (id: number) => boolean;
   deleteMockUser: (id: number) => boolean;
+  addRecallImpact: (record: Omit<RecallImpactRecord, "recall_impact_id">) => RecallImpactRecord;
+  updateRecallImpact: (id: number, record: Omit<RecallImpactRecord, "recall_impact_id">) => void;
+  deleteRecallImpact: (id: number) => void;
 };
 
 const initialSuppliers: Supplier[] = [
@@ -471,7 +474,11 @@ export function MockDataProvider({ children }: { children: ReactNode }) {
     updateProductBatch: (id, record) => {
       setProductBatches((current) => current.map((item) => item.product_batch_id === id ? { ...record, product_batch_id: id } : item));
     },
-    deleteProductBatch: (id) => setProductBatches((current) => current.filter((item) => item.product_batch_id !== id)),
+    deleteProductBatch: (id) => {
+      if (batchCompositions.some((item) => item.product_batch_id === id) || inventoryRecords.some((item) => item.product_batch_id === id) || shipments.some((item) => item.product_batch_id === id) || recallImpacts.some((item) => item.product_batch_id === id)) return false;
+      setProductBatches((current) => current.filter((item) => item.product_batch_id !== id));
+      return true;
+    },
     addBatchComposition: (record) => {
       const exists = batchCompositions.some((item) =>
         item.product_batch_id === record.product_batch_id &&
@@ -562,6 +569,13 @@ export function MockDataProvider({ children }: { children: ReactNode }) {
       setAppUsers((current) => current.filter((item) => item.user_id !== id));
       return true;
     },
+    addRecallImpact: (record) => {
+      const created = { ...record, recall_impact_id: nextId(recallImpacts, (item) => item.recall_impact_id) };
+      setRecallImpacts((current) => [...current, created]);
+      return created;
+    },
+    updateRecallImpact: (id, record) => setRecallImpacts((current) => current.map((item) => item.recall_impact_id === id ? { ...record, recall_impact_id: id } : item)),
+    deleteRecallImpact: (id) => setRecallImpacts((current) => current.filter((item) => item.recall_impact_id !== id)),
   };
 
   return <MockDataContext.Provider value={value}>{children}</MockDataContext.Provider>;

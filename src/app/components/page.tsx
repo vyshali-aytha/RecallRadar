@@ -1,18 +1,17 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { ConfirmDialog } from "@/components/crud/confirm-dialog";
 import { DataTable } from "@/components/crud/data-table";
 import { DetailField } from "@/components/crud/detail-field";
 import { FormField } from "@/components/crud/form-field";
 import { Modal } from "@/components/crud/modal";
-import { MockDataNotice } from "@/components/crud/mock-data-notice";
 import { PageHeading } from "@/components/crud/page-heading";
 import { RowActions } from "@/components/crud/row-actions";
 import { Badge, Button, Input, Select } from "@/components/ui/primitives";
 import { Icon } from "@/components/ui/icon";
-import { useMockData } from "@/lib/mock-data";
-import type { ComponentRecord } from "@/lib/mock-data";
+import { createComponent, deleteComponent, getAllComponents, getAllSuppliers, updateComponent } from "@/lib/member-a-actions";
+import type { ComponentInput, ComponentRecord, SupplierRecord } from "@/lib/member-a-types";
 
 type ComponentDraft = {
   name: string;
@@ -29,13 +28,41 @@ type ActiveDialog =
 const emptyDraft: ComponentDraft = { name: "", category: "", supplier_id: "" };
 
 export default function ComponentsPage() {
-  const { suppliers, components, bomEntries, componentBatches, recalls, addComponent, updateComponent, deleteComponent } = useMockData();
+  const [suppliers, setSuppliers] = useState<SupplierRecord[]>([]);
+  const [components, setComponents] = useState<ComponentRecord[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+  const [loadError, setLoadError] = useState("");
   const [query, setQuery] = useState("");
   const [categoryFilter, setCategoryFilter] = useState("all");
   const [activeDialog, setActiveDialog] = useState<ActiveDialog>(null);
   const [draft, setDraft] = useState<ComponentDraft>(emptyDraft);
   const [formError, setFormError] = useState("");
-  const [notice, setNotice] = useState("");
+  const [feedback, setFeedback] = useState<{ kind: "success" | "error"; message: string } | null>(null);
+
+  const refreshData = useCallback(async () => {
+    setLoading(true);
+    try {
+      const componentResult = await getAllComponents();
+      const supplierResult = await getAllSuppliers();
+      const errors: string[] = [];
+      if (componentResult.success) setComponents(componentResult.data);
+      else errors.push(`Components: ${componentResult.error}`);
+      if (supplierResult.success) setSuppliers(supplierResult.data);
+      else errors.push(`Suppliers: ${supplierResult.error}`);
+      setLoadError(errors.join(" "));
+    } catch {
+      setLoadError("Components and suppliers could not be loaded. Check the database connection and try again.");
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => { void refreshData(); }, 0);
+    return () => window.clearTimeout(timer);
+  }, [refreshData]);
 
   const categories = useMemo(
     () => [...new Set(components.map((component) => component.category).filter((value): value is string => Boolean(value)))].sort(),
@@ -58,26 +85,10 @@ export default function ComponentsPage() {
   const selectedSupplier = selectedComponent
     ? suppliers.find((supplier) => supplier.supplier_id === selectedComponent.supplier_id)
     : undefined;
-  const linkedBom = activeDialog?.kind === "delete"
-    ? bomEntries.filter((entry) => entry.component_id === activeDialog.id)
-    : [];
-  const linkedBatches = activeDialog?.kind === "delete"
-    ? componentBatches.filter((batch) => batch.component_id === activeDialog.id)
-    : [];
-  const linkedRecalls = activeDialog?.kind === "delete"
-    ? recalls.filter((recall) => recall.component_id === activeDialog.id)
-    : [];
-  const blockedReason = linkedBom.length > 0
-    ? "This component is used in a product BOM. Remove its BOM entries before deleting the component."
-    : linkedBatches.length > 0
-      ? "This component has supplier batches. Remove those batches before deleting the component."
-      : linkedRecalls.length > 0
-        ? "A recall targets this component. Resolve or reassign those recalls before deleting it."
-      : undefined;
-
   function openCreate() {
     setDraft({ ...emptyDraft, supplier_id: suppliers[0] ? String(suppliers[0].supplier_id) : "" });
     setFormError("");
+    setFeedback(null);
     setActiveDialog({ kind: "form", id: null });
   }
 
@@ -88,11 +99,13 @@ export default function ComponentsPage() {
       supplier_id: String(component.supplier_id),
     });
     setFormError("");
+    setFeedback(null);
     setActiveDialog({ kind: "form", id: component.component_id });
   }
 
-  function saveComponent(event: React.FormEvent<HTMLFormElement>) {
+  async function saveComponent(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    if (saving) return;
     const name = draft.name.trim();
     const supplierId = Number(draft.supplier_id);
     if (!name) {
@@ -104,26 +117,68 @@ export default function ComponentsPage() {
       return;
     }
 
-    const record = {
+    const record: ComponentInput = {
       name,
       category: draft.category.trim() || null,
       supplier_id: supplierId,
     };
-    if (activeDialog?.kind === "form" && activeDialog.id !== null) {
-      updateComponent(activeDialog.id, record);
-      setNotice(`${name} was updated in mock data.`);
-    } else {
-      addComponent(record);
-      setNotice(`${name} was added to mock data.`);
+
+    const normalizedCategory = record.category?.trim().toLocaleLowerCase() ?? "";
+    const duplicate = components.some((component) =>
+      component.component_id !== (activeDialog?.kind === "form" ? activeDialog.id : null) &&
+      component.supplier_id === supplierId &&
+      component.name.trim().toLocaleLowerCase() === name.toLocaleLowerCase() &&
+      (component.category?.trim().toLocaleLowerCase() ?? "") === normalizedCategory,
+    );
+    if (duplicate) {
+      setFormError("An identical component with this category already exists for that supplier.");
+      return;
     }
-    setActiveDialog(null);
+
+    setSaving(true);
+    setFormError("");
+    setFeedback(null);
+    try {
+      const editId = activeDialog?.kind === "form" ? activeDialog.id : null;
+      const isEditing = editId !== null;
+      const result = editId !== null
+        ? await updateComponent(editId, record)
+        : await createComponent(record);
+      if (!result.success) {
+        setFormError(result.error);
+        return;
+      }
+
+      setActiveDialog(null);
+      setFeedback({ kind: "success", message: isEditing ? `${name} was updated in MySQL.` : `${name} was added to MySQL.` });
+      await refreshData();
+    } catch {
+      setFormError("The component could not be saved. Check the database connection and try again.");
+    } finally {
+      setSaving(false);
+    }
   }
 
-  function confirmDelete() {
-    if (activeDialog?.kind !== "delete" || blockedReason || !selectedComponent) return;
-    if (!deleteComponent(selectedComponent.component_id)) return;
-    setNotice(`${selectedComponent.name} was removed from mock data.`);
-    setActiveDialog(null);
+  async function confirmDelete() {
+    if (activeDialog?.kind !== "delete" || !selectedComponent || deleting) return;
+    setDeleting(true);
+    setFeedback(null);
+    try {
+      const result = await deleteComponent(selectedComponent.component_id);
+      if (!result.success) {
+        setActiveDialog(null);
+        setFeedback({ kind: "error", message: result.error });
+        return;
+      }
+      setActiveDialog(null);
+      setFeedback({ kind: "success", message: `${selectedComponent.name} was deleted from MySQL.` });
+      await refreshData();
+    } catch {
+      setActiveDialog(null);
+      setFeedback({ kind: "error", message: "The component could not be deleted. It may be referenced by BOMs, batches, or recalls." });
+    } finally {
+      setDeleting(false);
+    }
   }
 
   const columns = [
@@ -166,15 +221,24 @@ export default function ComponentsPage() {
   return (
     <div className="space-y-6">
       <PageHeading
-        action={<Button disabled={suppliers.length === 0} onClick={openCreate} title={suppliers.length === 0 ? "Add a supplier before adding a component" : undefined}><span className="text-lg leading-none">+</span>Add component</Button>}
+        action={<Button disabled={loading || Boolean(loadError) || suppliers.length === 0} onClick={openCreate} title={suppliers.length === 0 ? "Add a supplier before adding a component" : undefined}><span className="text-lg leading-none">+</span>Add component</Button>}
         description="Track the parts and materials that flow from suppliers into finished products."
         title="Components"
       />
-      <MockDataNotice />
-      {notice && (
-        <div className="flex items-center justify-between rounded-xl border border-sage bg-sage/45 px-4 py-3 text-xs font-medium text-forest" role="status">
-          <span>{notice}</span>
-          <button aria-label="Dismiss message" className="ml-3 text-forest/70 hover:text-forest" onClick={() => setNotice("")} type="button"><Icon name="close" size={15} /></button>
+      <div className="flex flex-wrap items-center gap-2.5 rounded-xl border border-sage bg-sage/45 px-3.5 py-3 text-xs text-forest" role="note">
+        <Icon name="database" size={15} />
+        <span>Components and supplier choices are loaded from MySQL.</span>
+      </div>
+      {feedback && (
+        <div className={`flex items-center justify-between rounded-xl px-4 py-3 text-xs font-medium ${feedback.kind === "success" ? "border border-sage bg-sage/45 text-forest" : "border border-red-200 bg-red-50 text-red-800"}`} role={feedback.kind === "success" ? "status" : "alert"}>
+          <span>{feedback.message}</span>
+          <button aria-label="Dismiss message" className="ml-3 opacity-70 hover:opacity-100" onClick={() => setFeedback(null)} type="button"><Icon name="close" size={15} /></button>
+        </div>
+      )}
+      {loadError && (
+        <div className="flex flex-col gap-3 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-xs text-red-800 sm:flex-row sm:items-center sm:justify-between" role="alert">
+          <span>Database records could not be fully loaded: {loadError}</span>
+          <Button className="min-h-9 shrink-0" disabled={loading} onClick={() => void refreshData()} size="sm" variant="outline">{loading ? "Loading…" : "Retry"}</Button>
         </div>
       )}
 
@@ -191,36 +255,37 @@ export default function ComponentsPage() {
             {categories.map((category) => <option key={category} value={category}>{category}</option>)}
           </Select>
         </label>
-        <p className="px-1 text-xs text-muted sm:ml-1">{filteredComponents.length} component{filteredComponents.length === 1 ? "" : "s"}</p>
+        <p aria-live="polite" className="px-1 text-xs text-muted sm:ml-1">{loading ? "Loading components…" : `${filteredComponents.length} component${filteredComponents.length === 1 ? "" : "s"}`}</p>
       </div>
 
       <DataTable
         columns={columns}
-        emptyDescription={query || categoryFilter !== "all" ? "Adjust your search or choose another category." : "Add a component and link it to its supplier."}
-        emptyTitle={query || categoryFilter !== "all" ? "No components match these filters" : "No components yet"}
+        emptyDescription={loading ? "Loading components from MySQL…" : loadError ? "Retry to load components and supplier choices." : query || categoryFilter !== "all" ? "Adjust your search or choose another category." : "Add a component and link it to its supplier."}
+        emptyTitle={loading ? "Loading components" : loadError ? "Components unavailable" : query || categoryFilter !== "all" ? "No components match these filters" : "No components yet"}
         rowKey={(component) => component.component_id}
         rows={filteredComponents}
+        footerLabel="Live MySQL records"
       />
 
       {activeDialog?.kind === "form" && (
-        <Modal description="Every component must be assigned to a supplier." onClose={() => setActiveDialog(null)} title={activeDialog.id === null ? "Add component" : "Edit component"}>
+        <Modal description="Every component must be assigned to a supplier. Changes are saved to MySQL." onClose={() => !saving && setActiveDialog(null)} title={activeDialog.id === null ? "Add component" : "Edit component"}>
           <form className="space-y-4" onSubmit={saveComponent}>
-            <FormField error={formError && !draft.name.trim() ? formError : undefined} htmlFor="component-name" label="Component name" required>
+            <FormField htmlFor="component-name" label="Component name" required>
               <Input autoFocus id="component-name" maxLength={150} onChange={(event) => { setDraft({ ...draft, name: event.target.value }); setFormError(""); }} placeholder="e.g. Temperature Sensor" required value={draft.name} />
             </FormField>
             <FormField htmlFor="component-category" label="Category" hint="Optional">
               <Input id="component-category" maxLength={100} onChange={(event) => setDraft({ ...draft, category: event.target.value })} placeholder="e.g. Sensors" value={draft.category} />
             </FormField>
-            <FormField error={formError.includes("supplier") ? formError : undefined} htmlFor="component-supplier" label="Supplier" required>
+            <FormField htmlFor="component-supplier" label="Supplier" required>
               <Select id="component-supplier" onChange={(event) => { setDraft({ ...draft, supplier_id: event.target.value }); setFormError(""); }} required value={draft.supplier_id}>
                 <option value="">Choose supplier</option>
                 {suppliers.map((supplier) => <option key={supplier.supplier_id} value={supplier.supplier_id}>{supplier.name}</option>)}
               </Select>
             </FormField>
-            {formError && !formError.includes("supplier") && draft.name.trim() && <p className="text-xs font-medium text-red-700" role="alert">{formError}</p>}
+            {formError && <p className="text-xs font-medium text-red-700" role="alert">{formError}</p>}
             <div className="flex flex-col-reverse gap-2 border-t border-line pt-4 sm:flex-row sm:justify-end">
-              <Button onClick={() => setActiveDialog(null)} variant="outline">Cancel</Button>
-              <Button disabled={suppliers.length === 0} type="submit">{activeDialog.id === null ? "Add component" : "Save changes"}</Button>
+              <Button disabled={saving} onClick={() => setActiveDialog(null)} variant="outline">Cancel</Button>
+              <Button disabled={saving || loading || Boolean(loadError) || suppliers.length === 0} type="submit">{saving ? "Saving…" : activeDialog.id === null ? "Add component" : "Save changes"}</Button>
             </div>
           </form>
         </Modal>
@@ -242,11 +307,12 @@ export default function ComponentsPage() {
 
       {activeDialog?.kind === "delete" && selectedComponent && (
         <ConfirmDialog
-          blockedReason={blockedReason}
-          description={`Delete ${selectedComponent.name}? This action removes the component from temporary mock data.`}
-          onClose={() => setActiveDialog(null)}
+          description={`Delete ${selectedComponent.name} from MySQL? The database will prevent deletion while BOMs, batches, or recalls reference it.`}
+          onClose={() => !deleting && setActiveDialog(null)}
           onConfirm={confirmDelete}
           title="Delete component"
+          confirmLabel={deleting ? "Deleting…" : "Delete component"}
+          pending={deleting}
         />
       )}
     </div>

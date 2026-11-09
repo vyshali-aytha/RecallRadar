@@ -1,8 +1,10 @@
 "use client";
 
 import { useState } from "react";
+import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/primitives";
 import { Icon } from "@/components/ui/icon";
+import { useSession } from "@/lib/session-context";
 
 type TopHeaderProps = {
   title: string;
@@ -10,7 +12,27 @@ type TopHeaderProps = {
 };
 
 export function TopHeader({ title, onMenuClick }: TopHeaderProps) {
+  const router = useRouter();
+  const { user, logout } = useSession();
   const [profileOpen, setProfileOpen] = useState(false);
+  const [loggingOut, setLoggingOut] = useState(false);
+  const [logoutError, setLogoutError] = useState("");
+
+  async function signOut() {
+    if (loggingOut) return;
+    setLoggingOut(true);
+    setLogoutError("");
+    try {
+      await logout();
+      router.replace("/login");
+    } catch {
+      setLogoutError("Sign out could not be completed. Please try again.");
+    } finally {
+      setLoggingOut(false);
+    }
+  }
+
+  const initials = user?.name.split(/\s+/).filter(Boolean).slice(0, 2).map((part) => part[0]?.toUpperCase()).join("") || "RR";
 
   return (
     <header className="sticky top-0 z-30 border-b border-line/80 bg-ivory/90 backdrop-blur-xl">
@@ -55,11 +77,11 @@ export function TopHeader({ title, onMenuClick }: TopHeaderProps) {
               type="button"
             >
               <span className="flex size-9 items-center justify-center rounded-xl bg-forest text-xs font-semibold text-white">
-                RR
+                {initials}
               </span>
               <span className="hidden min-w-0 sm:block">
-                <span className="block text-xs font-semibold text-ink">Workspace member</span>
-                <span className="mt-0.5 block text-[10px] text-muted">Operations team</span>
+                <span className="block max-w-40 truncate text-xs font-semibold text-ink">{user?.name ?? "RecallRadar member"}</span>
+                <span className="mt-0.5 block text-[10px] text-muted">{user?.role ?? "Workspace"}</span>
               </span>
               <Icon className="hidden text-muted sm:block" name="chevron-down" size={15} />
             </button>
@@ -71,12 +93,12 @@ export function TopHeader({ title, onMenuClick }: TopHeaderProps) {
                 role="region"
               >
                 <div className="border-b border-line px-3 pb-3 pt-1">
-                  <p className="text-sm font-semibold text-ink">RecallRadar workspace</p>
-                  <p className="mt-1 text-xs text-muted">Profile controls will be available here.</p>
+                  <p className="truncate text-sm font-semibold text-ink">{user?.name ?? "RecallRadar member"}</p>
+                  <p className="mt-1 truncate text-xs text-muted">{user?.email}</p>
+                  <p className="mt-1 text-[10px] font-semibold uppercase tracking-wide text-forest">{user?.role}</p>
                 </div>
-                <p className="px-3 pt-3 text-[11px] font-medium text-muted">
-                  Account and sign-in are not configured yet.
-                </p>
+                {logoutError && <p className="px-3 pt-3 text-xs text-red-700" role="alert">{logoutError}</p>}
+                <button className="mt-2 flex min-h-10 w-full items-center justify-between rounded-xl px-3 text-left text-xs font-semibold text-ink transition hover:bg-stone-50 disabled:opacity-60" disabled={loggingOut} onClick={() => void signOut()} type="button"><span>{loggingOut ? "Signing out…" : "Sign out"}</span><Icon name="arrow-up-right" size={15} /></button>
               </div>
             )}
           </div>

@@ -10,6 +10,7 @@ type ConfirmDialogProps = {
   onConfirm: () => void;
   confirmLabel?: string;
   blockedReason?: string;
+  pending?: boolean;
 };
 
 export function ConfirmDialog({
@@ -19,6 +20,7 @@ export function ConfirmDialog({
   onConfirm,
   confirmLabel = "Delete record",
   blockedReason,
+  pending = false,
 }: ConfirmDialogProps) {
   return (
     <Modal description="Review this action before continuing." onClose={onClose} title={title}>
@@ -30,7 +32,7 @@ export function ConfirmDialog({
       )}
       <div className="mt-6 flex flex-col-reverse justify-end gap-2 sm:flex-row">
         <Button onClick={onClose} variant="outline">Cancel</Button>
-        <Button disabled={Boolean(blockedReason)} onClick={onConfirm} variant="danger">
+        <Button disabled={Boolean(blockedReason) || pending} onClick={onConfirm} variant="danger">
           {confirmLabel}
         </Button>
       </div>

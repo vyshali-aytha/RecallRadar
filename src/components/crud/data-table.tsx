@@ -14,9 +14,10 @@ type DataTableProps<T> = {
   rowKey: (row: T) => string | number;
   emptyTitle: string;
   emptyDescription: string;
+  footerLabel?: string;
 };
 
-export function DataTable<T>({ columns, rows, rowKey, emptyTitle, emptyDescription }: DataTableProps<T>) {
+export function DataTable<T>({ columns, rows, rowKey, emptyTitle, emptyDescription, footerLabel = "Showing current mock data" }: DataTableProps<T>) {
   return (
     <div className="overflow-hidden rounded-2xl border border-line bg-white shadow-card">
       <div className="overflow-x-auto">
@@ -57,7 +58,7 @@ export function DataTable<T>({ columns, rows, rowKey, emptyTitle, emptyDescripti
       </div>
       <div className="flex items-center justify-between border-t border-line bg-white px-5 py-3 text-[11px] text-muted">
         <span>{rows.length} {rows.length === 1 ? "record" : "records"}</span>
-        <span className="hidden sm:inline">Showing current mock data</span>
+        <span className="hidden sm:inline">{footerLabel}</span>
       </div>
     </div>
   );

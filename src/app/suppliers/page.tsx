@@ -1,18 +1,17 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { ConfirmDialog } from "@/components/crud/confirm-dialog";
 import { DataTable } from "@/components/crud/data-table";
 import { DetailField } from "@/components/crud/detail-field";
 import { FormField } from "@/components/crud/form-field";
 import { Modal } from "@/components/crud/modal";
-import { MockDataNotice } from "@/components/crud/mock-data-notice";
 import { PageHeading } from "@/components/crud/page-heading";
 import { RowActions } from "@/components/crud/row-actions";
 import { Button, Input } from "@/components/ui/primitives";
 import { Icon } from "@/components/ui/icon";
-import { useMockData } from "@/lib/mock-data";
-import type { Supplier } from "@/lib/mock-data";
+import { createSupplier, deleteSupplier, getAllSuppliers, updateSupplier } from "@/lib/member-a-actions";
+import type { SupplierInput, SupplierRecord } from "@/lib/member-a-types";
 
 type SupplierDraft = {
   name: string;
@@ -34,12 +33,38 @@ function optionalValue(value: string) {
 }
 
 export default function SuppliersPage() {
-  const { suppliers, components, addSupplier, updateSupplier, deleteSupplier } = useMockData();
+  const [suppliers, setSuppliers] = useState<SupplierRecord[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+  const [loadError, setLoadError] = useState("");
   const [query, setQuery] = useState("");
   const [activeDialog, setActiveDialog] = useState<ActiveDialog>(null);
   const [draft, setDraft] = useState<SupplierDraft>(emptyDraft);
   const [formError, setFormError] = useState("");
-  const [notice, setNotice] = useState("");
+  const [feedback, setFeedback] = useState<{ kind: "success" | "error"; message: string } | null>(null);
+
+  const refreshSuppliers = useCallback(async () => {
+    setLoading(true);
+    try {
+      const result = await getAllSuppliers();
+      if (result.success) {
+        setSuppliers(result.data);
+        setLoadError("");
+      } else {
+        setLoadError(result.error);
+      }
+    } catch {
+      setLoadError("The supplier list could not be loaded. Check the connection and try again.");
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => { void refreshSuppliers(); }, 0);
+    return () => window.clearTimeout(timer);
+  }, [refreshSuppliers]);
 
   const filteredSuppliers = useMemo(() => {
     const normalized = query.trim().toLowerCase();
@@ -53,20 +78,14 @@ export default function SuppliersPage() {
   const selectedSupplier = activeDialog
     ? suppliers.find((supplier) => supplier.supplier_id === activeDialog.id)
     : undefined;
-  const linkedComponents = activeDialog?.kind === "delete"
-    ? components.filter((component) => component.supplier_id === activeDialog.id)
-    : [];
-  const blockedReason = linkedComponents.length > 0
-    ? `This supplier is assigned to ${linkedComponents.map((component) => component.name).join(", ")}. Reassign or remove those components before deleting the supplier.`
-    : undefined;
-
   function openCreate() {
     setDraft(emptyDraft);
     setFormError("");
+    setFeedback(null);
     setActiveDialog({ kind: "form", id: null });
   }
 
-  function openEdit(supplier: Supplier) {
+  function openEdit(supplier: SupplierRecord) {
     setDraft({
       name: supplier.name,
       contact_email: supplier.contact_email ?? "",
@@ -74,39 +93,68 @@ export default function SuppliersPage() {
       address: supplier.address ?? "",
     });
     setFormError("");
+    setFeedback(null);
     setActiveDialog({ kind: "form", id: supplier.supplier_id });
   }
 
-  function saveSupplier(event: React.FormEvent<HTMLFormElement>) {
+  async function saveSupplier(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    if (saving) return;
     const name = draft.name.trim();
     if (!name) {
       setFormError("Enter a supplier name.");
       return;
     }
 
-    const record = {
+    const record: SupplierInput = {
       name,
       contact_email: optionalValue(draft.contact_email),
       phone: optionalValue(draft.phone),
       address: optionalValue(draft.address),
     };
 
-    if (activeDialog?.kind === "form" && activeDialog.id !== null) {
-      updateSupplier(activeDialog.id, record);
-      setNotice(`${name} was updated in mock data.`);
-    } else {
-      addSupplier(record);
-      setNotice(`${name} was added to mock data.`);
+    setSaving(true);
+    setFormError("");
+    setFeedback(null);
+    try {
+      const result = activeDialog?.kind === "form" && activeDialog.id !== null
+        ? await updateSupplier(activeDialog.id, record)
+        : await createSupplier(record);
+      if (!result.success) {
+        setFormError(result.error);
+        return;
+      }
+
+      setActiveDialog(null);
+      setFeedback({ kind: "success", message: activeDialog?.kind === "form" && activeDialog.id !== null ? `${name} was updated in MySQL.` : `${name} was added to MySQL.` });
+      await refreshSuppliers();
+    } catch {
+      setFormError("The supplier could not be saved. Check the connection and try again.");
+    } finally {
+      setSaving(false);
     }
-    setActiveDialog(null);
   }
 
-  function confirmDelete() {
-    if (activeDialog?.kind !== "delete" || blockedReason || !selectedSupplier) return;
-    deleteSupplier(selectedSupplier.supplier_id);
-    setNotice(`${selectedSupplier.name} was removed from mock data.`);
-    setActiveDialog(null);
+  async function confirmDelete() {
+    if (activeDialog?.kind !== "delete" || !selectedSupplier || deleting) return;
+    setDeleting(true);
+    setFeedback(null);
+    try {
+      const result = await deleteSupplier(selectedSupplier.supplier_id);
+      if (!result.success) {
+        setActiveDialog(null);
+        setFeedback({ kind: "error", message: result.error });
+        return;
+      }
+      setActiveDialog(null);
+      setFeedback({ kind: "success", message: `${selectedSupplier.name} was deleted from MySQL.` });
+      await refreshSuppliers();
+    } catch {
+      setActiveDialog(null);
+      setFeedback({ kind: "error", message: "The supplier could not be deleted. It may be referenced by components or the database may be unavailable." });
+    } finally {
+      setDeleting(false);
+    }
   }
 
   const columns = [
@@ -114,34 +162,34 @@ export default function SuppliersPage() {
       key: "supplier_id",
       label: "Supplier ID",
       className: "w-28",
-      render: (supplier: Supplier) => <span className="font-mono text-xs text-muted">{supplier.supplier_id}</span>,
+      render: (supplier: SupplierRecord) => <span className="font-mono text-xs text-muted">{supplier.supplier_id}</span>,
     },
     {
       key: "name",
       label: "Supplier",
-      render: (supplier: Supplier) => <span className="font-semibold text-ink">{supplier.name}</span>,
+      render: (supplier: SupplierRecord) => <span className="font-semibold text-ink">{supplier.name}</span>,
     },
     {
       key: "contact_email",
       label: "Email",
-      render: (supplier: Supplier) => supplier.contact_email ?? <span className="text-muted">—</span>,
+      render: (supplier: SupplierRecord) => supplier.contact_email ?? <span className="text-muted">—</span>,
     },
     {
       key: "phone",
       label: "Phone",
-      render: (supplier: Supplier) => supplier.phone ?? <span className="text-muted">—</span>,
+      render: (supplier: SupplierRecord) => supplier.phone ?? <span className="text-muted">—</span>,
     },
     {
       key: "address",
       label: "Address",
       className: "max-w-[240px]",
-      render: (supplier: Supplier) => <span className="block truncate text-xs text-muted">{supplier.address ?? "—"}</span>,
+      render: (supplier: SupplierRecord) => <span className="block truncate text-xs text-muted">{supplier.address ?? "—"}</span>,
     },
     {
       key: "actions",
       label: "Actions",
       className: "w-32 text-right",
-      render: (supplier: Supplier) => (
+      render: (supplier: SupplierRecord) => (
         <RowActions
           label="supplier"
           onDelete={() => setActiveDialog({ kind: "delete", id: supplier.supplier_id })}
@@ -159,13 +207,22 @@ export default function SuppliersPage() {
         description="Manage the partners that supply components across your product network."
         title="Suppliers"
       />
-      <MockDataNotice />
-      {notice && (
-        <div className="flex items-center justify-between rounded-xl border border-sage bg-sage/45 px-4 py-3 text-xs font-medium text-forest" role="status">
-          <span>{notice}</span>
-          <button aria-label="Dismiss message" className="ml-3 text-forest/70 hover:text-forest" onClick={() => setNotice("")} type="button">
+      <div className="flex flex-wrap items-center gap-2.5 rounded-xl border border-sage bg-sage/45 px-3.5 py-3 text-xs text-forest" role="note">
+        <Icon name="database" size={15} />
+        <span>Supplier records are read from and saved to MySQL.</span>
+      </div>
+      {feedback && (
+        <div className={`flex items-center justify-between rounded-xl px-4 py-3 text-xs font-medium ${feedback.kind === "success" ? "border border-sage bg-sage/45 text-forest" : "border border-red-200 bg-red-50 text-red-800"}`} role={feedback.kind === "success" ? "status" : "alert"}>
+          <span>{feedback.message}</span>
+          <button aria-label="Dismiss message" className="ml-3 opacity-70 hover:opacity-100" onClick={() => setFeedback(null)} type="button">
             <Icon name="close" size={15} />
           </button>
+        </div>
+      )}
+      {loadError && (
+        <div className="flex flex-col gap-3 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-xs text-red-800 sm:flex-row sm:items-center sm:justify-between" role="alert">
+          <span>Suppliers could not be loaded: {loadError}</span>
+          <Button className="min-h-9 shrink-0" onClick={() => void refreshSuppliers()} size="sm" variant="outline">Retry</Button>
         </div>
       )}
 
@@ -175,20 +232,21 @@ export default function SuppliersPage() {
           <Icon className="absolute left-3.5 top-1/2 -translate-y-1/2 text-muted" name="search" size={16} />
           <Input onChange={(event) => setQuery(event.target.value)} placeholder="Search suppliers" value={query} className="pl-10" />
         </label>
-        <p className="px-1 text-xs text-muted">{filteredSuppliers.length} supplier{filteredSuppliers.length === 1 ? "" : "s"}</p>
+        <p aria-live="polite" className="px-1 text-xs text-muted">{loading ? "Loading suppliers…" : `${filteredSuppliers.length} supplier${filteredSuppliers.length === 1 ? "" : "s"}`}</p>
       </div>
 
       <DataTable
         columns={columns}
-        emptyDescription={query ? "Try another search term, or clear your search." : "Add your first supplier to start building a traceable network."}
-        emptyTitle={query ? "No suppliers match your search" : "No suppliers yet"}
+        emptyDescription={loading ? "Loading supplier records from MySQL…" : loadError ? "Retry the database read to view supplier records." : query ? "Try another search term, or clear your search." : "Add your first supplier to start building a traceable network."}
+        emptyTitle={loading ? "Loading suppliers" : loadError ? "Supplier records unavailable" : query ? "No suppliers match your search" : "No suppliers yet"}
         rowKey={(supplier) => supplier.supplier_id}
         rows={filteredSuppliers}
+        footerLabel="Live MySQL records"
       />
 
       {activeDialog?.kind === "form" && (
         <Modal
-          description="Supplier details are kept in temporary mock data during this preview."
+          description="Supplier details are saved to the RecallRadar MySQL database."
           onClose={() => setActiveDialog(null)}
           title={activeDialog.id === null ? "Add supplier" : "Edit supplier"}
         >
@@ -206,8 +264,8 @@ export default function SuppliersPage() {
               <Input autoComplete="street-address" id="supplier-address" maxLength={255} onChange={(event) => setDraft({ ...draft, address: event.target.value })} placeholder="Street, city, region" value={draft.address} />
             </FormField>
             <div className="flex flex-col-reverse gap-2 border-t border-line pt-4 sm:flex-row sm:justify-end">
-              <Button onClick={() => setActiveDialog(null)} variant="outline">Cancel</Button>
-              <Button type="submit">{activeDialog.id === null ? "Add supplier" : "Save changes"}</Button>
+              <Button disabled={saving} onClick={() => setActiveDialog(null)} variant="outline">Cancel</Button>
+              <Button disabled={saving} type="submit">{saving ? "Saving…" : activeDialog.id === null ? "Add supplier" : "Save changes"}</Button>
             </div>
           </form>
         </Modal>
@@ -229,11 +287,12 @@ export default function SuppliersPage() {
 
       {activeDialog?.kind === "delete" && selectedSupplier && (
         <ConfirmDialog
-          blockedReason={blockedReason}
-          description={`Delete ${selectedSupplier.name}? This action removes the record from temporary mock data.`}
+          description={`Delete ${selectedSupplier.name} from MySQL? Related components may prevent deletion.`}
           onClose={() => setActiveDialog(null)}
           onConfirm={confirmDelete}
           title="Delete supplier"
+          confirmLabel={deleting ? "Deleting…" : "Delete supplier"}
+          pending={deleting}
         />
       )}
     </div>

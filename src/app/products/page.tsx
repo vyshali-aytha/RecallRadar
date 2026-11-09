@@ -1,18 +1,19 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { ConfirmDialog } from "@/components/crud/confirm-dialog";
 import { DataTable } from "@/components/crud/data-table";
 import { DetailField } from "@/components/crud/detail-field";
 import { FormField } from "@/components/crud/form-field";
 import { Modal } from "@/components/crud/modal";
-import { MockDataNotice } from "@/components/crud/mock-data-notice";
 import { PageHeading } from "@/components/crud/page-heading";
 import { RowActions } from "@/components/crud/row-actions";
 import { Badge, Button, Input, Select } from "@/components/ui/primitives";
 import { Icon } from "@/components/ui/icon";
+import { createProduct as createProductAction, deleteProduct as deleteProductAction, getAllProducts, updateProduct as updateProductAction } from "@/lib/member-a-actions";
+import type { ProductInput, ProductRecord } from "@/lib/member-a-types";
 import { useMockData } from "@/lib/mock-data";
-import type { BomEntry, Product } from "@/lib/mock-data";
+import type { BomEntry } from "@/lib/mock-data";
 
 type ProductDraft = {
   name: string;
@@ -30,23 +31,24 @@ const emptyDraft: ProductDraft = { name: "", category: "", sku: "" };
 
 export default function ProductsPage() {
   const {
-    products,
     components,
-    productBatches,
     bomEntries,
-    addProduct,
-    updateProduct,
-    deleteProduct,
     addBomEntry,
     updateBomEntry,
     deleteBomEntry,
   } = useMockData();
+  const [products, setProducts] = useState<ProductRecord[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+  const [loadError, setLoadError] = useState("");
   const [query, setQuery] = useState("");
   const [categoryFilter, setCategoryFilter] = useState("all");
   const [activeDialog, setActiveDialog] = useState<ActiveDialog>(null);
   const [draft, setDraft] = useState<ProductDraft>(emptyDraft);
   const [formError, setFormError] = useState("");
   const [notice, setNotice] = useState("");
+  const [feedback, setFeedback] = useState<{ kind: "success" | "error"; message: string } | null>(null);
   const [addingBom, setAddingBom] = useState(false);
   const [bomComponentId, setBomComponentId] = useState("");
   const [bomQuantity, setBomQuantity] = useState("1.00");
@@ -54,6 +56,28 @@ export default function ProductsPage() {
   const [editingComponentId, setEditingComponentId] = useState<number | null>(null);
   const [editingQuantity, setEditingQuantity] = useState("");
   const [removingBomId, setRemovingBomId] = useState<number | null>(null);
+
+  const refreshProducts = useCallback(async () => {
+    setLoading(true);
+    try {
+      const result = await getAllProducts();
+      if (result.success) {
+        setProducts(result.data);
+        setLoadError("");
+      } else {
+        setLoadError(result.error);
+      }
+    } catch {
+      setLoadError("Products could not be loaded. Check the database connection and try again.");
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => { void refreshProducts(); }, 0);
+    return () => window.clearTimeout(timer);
+  }, [refreshProducts]);
 
   const categories = useMemo(
     () => [...new Set(products.map((product) => product.category).filter((value): value is string => Boolean(value)))].sort(),
@@ -75,17 +99,6 @@ export default function ProductsPage() {
   const selectedBom: BomEntry[] = activeDialog?.kind === "view"
     ? bomEntries.filter((entry) => entry.product_id === activeDialog.id)
     : [];
-  const linkedBom = activeDialog?.kind === "delete"
-    ? bomEntries.filter((entry) => entry.product_id === activeDialog.id)
-    : [];
-  const linkedBatches = activeDialog?.kind === "delete"
-    ? productBatches.filter((batch) => batch.product_id === activeDialog.id)
-    : [];
-  const blockedReason = linkedBom.length > 0
-    ? "This product has Bill of Materials entries. Remove those component relationships from the product details before deleting the product."
-    : linkedBatches.length > 0
-      ? "This product has production batches. Remove those batches before deleting the product."
-      : undefined;
   const availableComponents = activeDialog?.kind === "view"
     ? components.filter((component) => !selectedBom.some((entry) => entry.component_id === component.component_id))
     : [];
@@ -93,16 +106,18 @@ export default function ProductsPage() {
   function openCreate() {
     setDraft(emptyDraft);
     setFormError("");
+    setFeedback(null);
     setActiveDialog({ kind: "form", id: null });
   }
 
-  function openEdit(product: Product) {
+  function openEdit(product: ProductRecord) {
     setDraft({ name: product.name, category: product.category ?? "", sku: product.sku });
     setFormError("");
+    setFeedback(null);
     setActiveDialog({ kind: "form", id: product.product_id });
   }
 
-  function openView(product: Product) {
+  function openView(product: ProductRecord) {
     setAddingBom(false);
     setBomComponentId("");
     setBomQuantity("1.00");
@@ -119,8 +134,9 @@ export default function ProductsPage() {
     setRemovingBomId(null);
   }
 
-  function saveProduct(event: React.FormEvent<HTMLFormElement>) {
+  async function saveProduct(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    if (saving) return;
     const name = draft.name.trim();
     const sku = draft.sku.trim();
     if (!name || !sku) {
@@ -136,22 +152,49 @@ export default function ProductsPage() {
       return;
     }
 
-    const record = { name, category: draft.category.trim() || null, sku };
-    if (activeDialog?.kind === "form" && activeDialog.id !== null) {
-      updateProduct(activeDialog.id, record);
-      setNotice(`${name} was updated in mock data.`);
-    } else {
-      addProduct(record);
-      setNotice(`${name} was added to mock data.`);
+    const record: ProductInput = { name, category: draft.category.trim() || null, sku };
+    setSaving(true);
+    setFormError("");
+    setFeedback(null);
+    try {
+      const editId = activeDialog?.kind === "form" ? activeDialog.id : null;
+      const result = editId !== null
+        ? await updateProductAction(editId, record)
+        : await createProductAction(record);
+      if (!result.success) {
+        setFormError(result.error);
+        return;
+      }
+      setActiveDialog(null);
+      setFeedback({ kind: "success", message: editId !== null ? `${name} was updated in MySQL.` : `${name} was added to MySQL.` });
+      await refreshProducts();
+    } catch {
+      setFormError("The product could not be saved. Check the database connection and try again.");
+    } finally {
+      setSaving(false);
     }
-    setActiveDialog(null);
   }
 
-  function confirmDelete() {
-    if (activeDialog?.kind !== "delete" || blockedReason || !selectedProduct) return;
-    deleteProduct(selectedProduct.product_id);
-    setNotice(`${selectedProduct.name} was removed from mock data.`);
-    setActiveDialog(null);
+  async function confirmDelete() {
+    if (activeDialog?.kind !== "delete" || !selectedProduct || deleting) return;
+    setDeleting(true);
+    setFeedback(null);
+    try {
+      const result = await deleteProductAction(selectedProduct.product_id);
+      if (!result.success) {
+        setActiveDialog(null);
+        setFeedback({ kind: "error", message: result.error });
+        return;
+      }
+      setActiveDialog(null);
+      setFeedback({ kind: "success", message: `${selectedProduct.name} was deleted from MySQL.` });
+      await refreshProducts();
+    } catch {
+      setActiveDialog(null);
+      setFeedback({ kind: "error", message: "The product could not be deleted. It may be referenced by a BOM or production batch." });
+    } finally {
+      setDeleting(false);
+    }
   }
 
   function saveBomEntry(event: React.FormEvent<HTMLFormElement>) {
@@ -194,28 +237,28 @@ export default function ProductsPage() {
       key: "product_id",
       label: "Product ID",
       className: "w-28",
-      render: (product: Product) => <span className="font-mono text-xs text-muted">{product.product_id}</span>,
+      render: (product: ProductRecord) => <span className="font-mono text-xs text-muted">{product.product_id}</span>,
     },
     {
       key: "name",
       label: "Product",
-      render: (product: Product) => <span className="font-semibold text-ink">{product.name}</span>,
+      render: (product: ProductRecord) => <span className="font-semibold text-ink">{product.name}</span>,
     },
     {
       key: "category",
       label: "Category",
-      render: (product: Product) => product.category ? <Badge tone="sage">{product.category}</Badge> : <span className="text-muted">—</span>,
+      render: (product: ProductRecord) => product.category ? <Badge tone="sage">{product.category}</Badge> : <span className="text-muted">—</span>,
     },
     {
       key: "sku",
       label: "SKU",
-      render: (product: Product) => <span className="font-mono text-xs tracking-wide text-ink/75">{product.sku}</span>,
+      render: (product: ProductRecord) => <span className="font-mono text-xs tracking-wide text-ink/75">{product.sku}</span>,
     },
     {
       key: "actions",
       label: "Actions",
       className: "w-32 text-right",
-      render: (product: Product) => (
+      render: (product: ProductRecord) => (
         <RowActions
           label="product"
           onDelete={() => setActiveDialog({ kind: "delete", id: product.product_id })}
@@ -229,11 +272,26 @@ export default function ProductsPage() {
   return (
     <div className="space-y-6">
       <PageHeading
-        action={<Button onClick={openCreate}><span className="text-lg leading-none">+</span>Add product</Button>}
+        action={<Button disabled={loading || Boolean(loadError)} onClick={openCreate}><span className="text-lg leading-none">+</span>Add product</Button>}
         description="Maintain the product catalog and the component recipes that define each product."
         title="Products"
       />
-      <MockDataNotice />
+      <div className="flex flex-wrap items-center gap-2.5 rounded-xl border border-sage bg-sage/45 px-3.5 py-3 text-xs text-forest" role="note">
+        <Icon name="database" size={15} />
+        <span>Product records are loaded from MySQL. BOM edits remain in temporary mock data for now.</span>
+      </div>
+      {feedback && (
+        <div className={`flex items-center justify-between rounded-xl px-4 py-3 text-xs font-medium ${feedback.kind === "success" ? "border border-sage bg-sage/45 text-forest" : "border border-red-200 bg-red-50 text-red-800"}`} role={feedback.kind === "success" ? "status" : "alert"}>
+          <span>{feedback.message}</span>
+          <button aria-label="Dismiss message" className="ml-3 opacity-70 hover:opacity-100" onClick={() => setFeedback(null)} type="button"><Icon name="close" size={15} /></button>
+        </div>
+      )}
+      {loadError && (
+        <div className="flex flex-col gap-3 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-xs text-red-800 sm:flex-row sm:items-center sm:justify-between" role="alert">
+          <span>Products could not be loaded: {loadError}</span>
+          <Button className="min-h-9 shrink-0" disabled={loading} onClick={() => void refreshProducts()} size="sm" variant="outline">{loading ? "Loading…" : "Retry"}</Button>
+        </div>
+      )}
       {notice && (
         <div className="flex items-center justify-between rounded-xl border border-sage bg-sage/45 px-4 py-3 text-xs font-medium text-forest" role="status">
           <span>{notice}</span>
@@ -254,33 +312,34 @@ export default function ProductsPage() {
             {categories.map((category) => <option key={category} value={category}>{category}</option>)}
           </Select>
         </label>
-        <p className="px-1 text-xs text-muted sm:ml-1">{filteredProducts.length} product{filteredProducts.length === 1 ? "" : "s"}</p>
+        <p aria-live="polite" className="px-1 text-xs text-muted sm:ml-1">{loading ? "Loading products…" : `${filteredProducts.length} product${filteredProducts.length === 1 ? "" : "s"}`}</p>
       </div>
 
       <DataTable
         columns={columns}
-        emptyDescription={query || categoryFilter !== "all" ? "Adjust your search or choose another category." : "Add a product to begin organizing your catalog."}
-        emptyTitle={query || categoryFilter !== "all" ? "No products match these filters" : "No products yet"}
+        emptyDescription={loading ? "Loading product records from MySQL…" : loadError ? "Retry to load products from MySQL." : query || categoryFilter !== "all" ? "Adjust your search or choose another category." : "Add a product to begin organizing your catalog."}
+        emptyTitle={loading ? "Loading products" : loadError ? "Products unavailable" : query || categoryFilter !== "all" ? "No products match these filters" : "No products yet"}
         rowKey={(product) => product.product_id}
         rows={filteredProducts}
+        footerLabel="Live MySQL records"
       />
 
       {activeDialog?.kind === "form" && (
-        <Modal description="Product details are held in temporary mock data." onClose={closeDialog} title={activeDialog.id === null ? "Add product" : "Edit product"}>
+        <Modal description="Product catalog details are saved to MySQL." onClose={() => !saving && closeDialog()} title={activeDialog.id === null ? "Add product" : "Edit product"}>
           <form className="space-y-4" onSubmit={saveProduct}>
             <FormField error={formError} htmlFor="product-name" label="Product name" required>
-              <Input autoFocus id="product-name" maxLength={150} onChange={(event) => setDraft({ ...draft, name: event.target.value })} placeholder="e.g. FrostGuard Vaccine Monitor" required value={draft.name} />
+              <Input autoFocus id="product-name" maxLength={150} onChange={(event) => { setDraft({ ...draft, name: event.target.value }); setFormError(""); }} placeholder="e.g. FrostGuard Vaccine Monitor" required value={draft.name} />
             </FormField>
             <FormField htmlFor="product-category" label="Category" hint="Optional">
-              <Input id="product-category" maxLength={100} onChange={(event) => setDraft({ ...draft, category: event.target.value })} placeholder="e.g. Cold-Chain Monitoring" value={draft.category} />
+              <Input id="product-category" maxLength={100} onChange={(event) => { setDraft({ ...draft, category: event.target.value }); setFormError(""); }} placeholder="e.g. Cold-Chain Monitoring" value={draft.category} />
             </FormField>
             <FormField error={formError.includes("SKU") ? formError : undefined} htmlFor="product-sku" label="SKU" required>
               <Input autoCapitalize="characters" id="product-sku" maxLength={50} onChange={(event) => { setDraft({ ...draft, sku: event.target.value }); setFormError(""); }} placeholder="e.g. FGVM-TEMP-001" required value={draft.sku} />
             </FormField>
             {!formError.includes("SKU") && formError && <p className="text-xs font-medium text-red-700" role="alert">{formError}</p>}
             <div className="flex flex-col-reverse gap-2 border-t border-line pt-4 sm:flex-row sm:justify-end">
-              <Button onClick={closeDialog} variant="outline">Cancel</Button>
-              <Button type="submit">{activeDialog.id === null ? "Add product" : "Save changes"}</Button>
+              <Button disabled={saving} onClick={closeDialog} variant="outline">Cancel</Button>
+              <Button disabled={saving || loading || Boolean(loadError)} type="submit">{saving ? "Saving…" : activeDialog.id === null ? "Add product" : "Save changes"}</Button>
             </div>
           </form>
         </Modal>
@@ -388,11 +447,12 @@ export default function ProductsPage() {
 
       {activeDialog?.kind === "delete" && selectedProduct && (
         <ConfirmDialog
-          blockedReason={blockedReason}
-          description={`Delete ${selectedProduct.name}? This removes the record from temporary mock data.`}
-          onClose={closeDialog}
+          description={`Delete ${selectedProduct.name} from MySQL? BOM entries or production batches may prevent deletion.`}
+          onClose={() => !deleting && closeDialog()}
           onConfirm={confirmDelete}
           title="Delete product"
+          confirmLabel={deleting ? "Deleting…" : "Delete product"}
+          pending={deleting}
         />
       )}
     </div>

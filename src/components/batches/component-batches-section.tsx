@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { ConfirmDialog } from "@/components/crud/confirm-dialog";
 import { DataTable } from "@/components/crud/data-table";
 import { DetailField } from "@/components/crud/detail-field";
@@ -10,8 +10,8 @@ import { RowActions } from "@/components/crud/row-actions";
 import { BatchStatusBadge } from "@/components/batches/batch-status-badge";
 import { Button, Input, Select } from "@/components/ui/primitives";
 import { Icon } from "@/components/ui/icon";
-import { useMockData } from "@/lib/mock-data";
-import type { ComponentBatch } from "@/lib/mock-data";
+import { createComponentBatch, deleteComponentBatch, getAllComponentBatches, getAllComponents, updateComponentBatch } from "@/lib/member-a-actions";
+import type { ComponentBatchInput, ComponentBatchRecord, ComponentRecord } from "@/lib/member-a-types";
 
 type ComponentBatchDraft = {
   batch_number: string;
@@ -39,14 +39,42 @@ const emptyDraft: ComponentBatchDraft = {
 };
 
 export function ComponentBatchesSection() {
-  const { components, componentBatches, batchCompositions, recalls, addComponentBatch, updateComponentBatch, deleteComponentBatch } = useMockData();
+  const [components, setComponents] = useState<ComponentRecord[]>([]);
+  const [componentBatches, setComponentBatches] = useState<ComponentBatchRecord[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+  const [loadError, setLoadError] = useState("");
   const [query, setQuery] = useState("");
   const [componentFilter, setComponentFilter] = useState("all");
   const [statusFilter, setStatusFilter] = useState("all");
   const [activeDialog, setActiveDialog] = useState<ActiveDialog>(null);
   const [draft, setDraft] = useState<ComponentBatchDraft>(emptyDraft);
   const [formError, setFormError] = useState("");
-  const [notice, setNotice] = useState("");
+  const [feedback, setFeedback] = useState<{ kind: "success" | "error"; message: string } | null>(null);
+
+  const refreshData = useCallback(async () => {
+    setLoading(true);
+    try {
+      const batchResult = await getAllComponentBatches();
+      const componentResult = await getAllComponents();
+      const errors: string[] = [];
+      if (batchResult.success) setComponentBatches(batchResult.data);
+      else errors.push(`Component batches: ${batchResult.error}`);
+      if (componentResult.success) setComponents(componentResult.data);
+      else errors.push(`Components: ${componentResult.error}`);
+      setLoadError(errors.join(" "));
+    } catch {
+      setLoadError("Component batches and component choices could not be loaded. Check the database connection and try again.");
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => { void refreshData(); }, 0);
+    return () => window.clearTimeout(timer);
+  }, [refreshData]);
 
   const filteredBatches = useMemo(() => {
     const normalized = query.trim().toLowerCase();
@@ -65,25 +93,14 @@ export function ComponentBatchesSection() {
   const selectedComponent = selectedBatch
     ? components.find((component) => component.component_id === selectedBatch.component_id)
     : undefined;
-  const linkedCompositions = activeDialog?.kind === "delete"
-    ? batchCompositions.filter((entry) => entry.component_batch_id === activeDialog.id)
-    : [];
-  const linkedRecalls = activeDialog?.kind === "delete"
-    ? recalls.filter((recall) => recall.component_batch_id === activeDialog.id)
-    : [];
-  const blockedReason = linkedCompositions.length > 0
-    ? "This component batch is used in product batch composition. Remove those composition entries before deleting it."
-    : linkedRecalls.length > 0
-      ? "A recall targets this component batch. Resolve or reassign those recalls before deleting it."
-    : undefined;
-
   function openCreate() {
     setDraft({ ...emptyDraft, component_id: components[0] ? String(components[0].component_id) : "" });
     setFormError("");
+    setFeedback(null);
     setActiveDialog({ kind: "form", id: null });
   }
 
-  function openEdit(batch: ComponentBatch) {
+  function openEdit(batch: ComponentBatchRecord) {
     setDraft({
       batch_number: batch.batch_number,
       manufacture_date: batch.manufacture_date ?? "",
@@ -93,11 +110,13 @@ export function ComponentBatchesSection() {
       component_id: String(batch.component_id),
     });
     setFormError("");
+    setFeedback(null);
     setActiveDialog({ kind: "form", id: batch.component_batch_id });
   }
 
-  function saveBatch(event: React.FormEvent<HTMLFormElement>) {
+  async function saveBatch(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    if (saving) return;
     const batchNumber = draft.batch_number.trim();
     const componentId = Number(draft.component_id);
     const quantity = Number(draft.quantity_received);
@@ -123,7 +142,7 @@ export function ComponentBatchesSection() {
       return;
     }
 
-    const record = {
+    const record: ComponentBatchInput = {
       batch_number: batchNumber,
       manufacture_date: draft.manufacture_date || null,
       expiry_date: draft.expiry_date || null,
@@ -131,21 +150,49 @@ export function ComponentBatchesSection() {
       status: draft.status.trim() || "active",
       component_id: componentId,
     };
-    if (activeDialog?.kind === "form" && activeDialog.id !== null) {
-      updateComponentBatch(activeDialog.id, record);
-      setNotice(`${batchNumber} was updated in mock data.`);
-    } else {
-      addComponentBatch(record);
-      setNotice(`${batchNumber} was added to mock data.`);
+
+    setSaving(true);
+    setFormError("");
+    setFeedback(null);
+    try {
+      const editId = activeDialog?.kind === "form" ? activeDialog.id : null;
+      const result = editId !== null
+        ? await updateComponentBatch(editId, record)
+        : await createComponentBatch(record);
+      if (!result.success) {
+        setFormError(result.error);
+        return;
+      }
+      setActiveDialog(null);
+      setFeedback({ kind: "success", message: editId !== null ? `${batchNumber} was updated in MySQL.` : `${batchNumber} was added to MySQL.` });
+      await refreshData();
+    } catch {
+      setFormError("The component batch could not be saved. Check the database connection and try again.");
+    } finally {
+      setSaving(false);
     }
-    setActiveDialog(null);
   }
 
-  function confirmDelete() {
-    if (activeDialog?.kind !== "delete" || blockedReason || !selectedBatch) return;
-    if (!deleteComponentBatch(selectedBatch.component_batch_id)) return;
-    setNotice(`${selectedBatch.batch_number} was removed from mock data.`);
-    setActiveDialog(null);
+  async function confirmDelete() {
+    if (activeDialog?.kind !== "delete" || !selectedBatch || deleting) return;
+    setDeleting(true);
+    setFeedback(null);
+    try {
+      const result = await deleteComponentBatch(selectedBatch.component_batch_id);
+      if (!result.success) {
+        setActiveDialog(null);
+        setFeedback({ kind: "error", message: result.error });
+        return;
+      }
+      setActiveDialog(null);
+      setFeedback({ kind: "success", message: `${selectedBatch.batch_number} was deleted from MySQL.` });
+      await refreshData();
+    } catch {
+      setActiveDialog(null);
+      setFeedback({ kind: "error", message: "The component batch could not be deleted. It may be referenced by a product composition or recall." });
+    } finally {
+      setDeleting(false);
+    }
   }
 
   const columns = [
@@ -153,44 +200,44 @@ export function ComponentBatchesSection() {
       key: "component_batch_id",
       label: "Batch ID",
       className: "w-20",
-      render: (batch: ComponentBatch) => <span className="font-mono text-xs text-muted">{batch.component_batch_id}</span>,
+      render: (batch: ComponentBatchRecord) => <span className="font-mono text-xs text-muted">{batch.component_batch_id}</span>,
     },
     {
       key: "batch_number",
       label: "Batch number",
-      render: (batch: ComponentBatch) => <span className="font-mono text-xs font-semibold tracking-wide text-ink">{batch.batch_number}</span>,
+      render: (batch: ComponentBatchRecord) => <span className="font-mono text-xs font-semibold tracking-wide text-ink">{batch.batch_number}</span>,
     },
     {
       key: "component",
       label: "Component",
-      render: (batch: ComponentBatch) => components.find((component) => component.component_id === batch.component_id)?.name ?? <span className="text-red-700">Component unavailable</span>,
+      render: (batch: ComponentBatchRecord) => components.find((component) => component.component_id === batch.component_id)?.name ?? <span className="text-red-700">Component unavailable</span>,
     },
     {
       key: "manufacture_date",
       label: "Manufactured",
-      render: (batch: ComponentBatch) => batch.manufacture_date ?? <span className="text-muted">—</span>,
+      render: (batch: ComponentBatchRecord) => batch.manufacture_date ?? <span className="text-muted">—</span>,
     },
     {
       key: "expiry_date",
       label: "Expiry",
-      render: (batch: ComponentBatch) => batch.expiry_date ?? <span className="text-muted">—</span>,
+      render: (batch: ComponentBatchRecord) => batch.expiry_date ?? <span className="text-muted">—</span>,
     },
     {
       key: "quantity_received",
       label: "Qty received",
       className: "w-28 text-right",
-      render: (batch: ComponentBatch) => <span className="font-mono text-xs">{batch.quantity_received.toLocaleString()}</span>,
+      render: (batch: ComponentBatchRecord) => <span className="font-mono text-xs">{batch.quantity_received.toLocaleString()}</span>,
     },
     {
       key: "status",
       label: "Status",
-      render: (batch: ComponentBatch) => <BatchStatusBadge status={batch.status} />,
+      render: (batch: ComponentBatchRecord) => <BatchStatusBadge status={batch.status} />,
     },
     {
       key: "actions",
       label: "Actions",
       className: "w-32 text-right",
-      render: (batch: ComponentBatch) => (
+      render: (batch: ComponentBatchRecord) => (
         <RowActions
           label="component batch"
           onDelete={() => setActiveDialog({ kind: "delete", id: batch.component_batch_id })}
@@ -209,14 +256,24 @@ export function ComponentBatchesSection() {
           <h2 className="mt-1 text-lg font-semibold tracking-tight text-ink" id="component-batches-heading">Component batches</h2>
           <p className="mt-1 text-xs text-muted">Record received lots and their source components.</p>
         </div>
-        <Button disabled={components.length === 0} onClick={openCreate} title={components.length === 0 ? "Add a component before creating a batch" : undefined}>
+        <Button disabled={loading || Boolean(loadError) || components.length === 0} onClick={openCreate} title={components.length === 0 ? "Add a component before creating a batch" : undefined}>
           <span className="text-lg leading-none">+</span>Add component batch
         </Button>
       </div>
-      {notice && (
-        <div className="flex items-center justify-between rounded-xl border border-sage bg-sage/45 px-4 py-3 text-xs font-medium text-forest" role="status">
-          <span>{notice}</span>
-          <button aria-label="Dismiss message" className="ml-3 text-forest/70 hover:text-forest" onClick={() => setNotice("")} type="button"><Icon name="close" size={15} /></button>
+      <div className="flex flex-wrap items-center gap-2.5 rounded-xl border border-sage bg-sage/45 px-3.5 py-3 text-xs text-forest" role="note">
+        <Icon name="database" size={15} />
+        <span>Component batches and component choices are loaded from MySQL.</span>
+      </div>
+      {feedback && (
+        <div className={`flex items-center justify-between rounded-xl px-4 py-3 text-xs font-medium ${feedback.kind === "success" ? "border border-sage bg-sage/45 text-forest" : "border border-red-200 bg-red-50 text-red-800"}`} role={feedback.kind === "success" ? "status" : "alert"}>
+          <span>{feedback.message}</span>
+          <button aria-label="Dismiss message" className="ml-3 opacity-70 hover:opacity-100" onClick={() => setFeedback(null)} type="button"><Icon name="close" size={15} /></button>
+        </div>
+      )}
+      {loadError && (
+        <div className="flex flex-col gap-3 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-xs text-red-800 sm:flex-row sm:items-center sm:justify-between" role="alert">
+          <span>Database records could not be fully loaded: {loadError}</span>
+          <Button className="min-h-9 shrink-0" disabled={loading} onClick={() => void refreshData()} size="sm" variant="outline">{loading ? "Loading…" : "Retry"}</Button>
         </div>
       )}
 
@@ -240,19 +297,20 @@ export function ComponentBatchesSection() {
             {statusOptions.map((status) => <option key={status} value={status}>{status.replaceAll("_", " ")}</option>)}
           </Select>
         </label>
-        <span className="px-1 text-xs text-muted sm:ml-auto">{filteredBatches.length} batches</span>
+        <span aria-live="polite" className="px-1 text-xs text-muted sm:ml-auto">{loading ? "Loading batches…" : `${filteredBatches.length} batches`}</span>
       </div>
 
       <DataTable
         columns={columns}
-        emptyDescription={query || componentFilter !== "all" || statusFilter !== "all" ? "Try another search or adjust the filters." : "Add a component batch to record an incoming lot."}
-        emptyTitle={query || componentFilter !== "all" || statusFilter !== "all" ? "No batches match these filters" : "No component batches yet"}
+        emptyDescription={loading ? "Loading component batches from MySQL…" : loadError ? "Retry to load component batches and component choices." : query || componentFilter !== "all" || statusFilter !== "all" ? "Try another search or adjust the filters." : "Add a component batch to record an incoming lot."}
+        emptyTitle={loading ? "Loading component batches" : loadError ? "Component batches unavailable" : query || componentFilter !== "all" || statusFilter !== "all" ? "No batches match these filters" : "No component batches yet"}
         rowKey={(batch) => batch.component_batch_id}
         rows={filteredBatches}
+        footerLabel="Live MySQL records"
       />
 
       {activeDialog?.kind === "form" && (
-        <Modal description="Batch number is unique within its selected component." onClose={() => setActiveDialog(null)} title={activeDialog.id === null ? "Add component batch" : "Edit component batch"}>
+        <Modal description="Batch number is unique within its selected component. Changes are saved to MySQL." onClose={() => !saving && setActiveDialog(null)} title={activeDialog.id === null ? "Add component batch" : "Edit component batch"}>
           <form className="space-y-4" onSubmit={saveBatch}>
             <FormField error={formError.includes("Batch number") || formError.includes("already exists") ? formError : undefined} htmlFor="component-batch-number" label="Batch number" required>
               <Input autoFocus id="component-batch-number" maxLength={100} onChange={(event) => { setDraft({ ...draft, batch_number: event.target.value }); setFormError(""); }} placeholder="e.g. NSPC-TS-2026-0812" required value={draft.batch_number} />
@@ -264,10 +322,10 @@ export function ComponentBatchesSection() {
               </Select>
             </FormField>
             <div className="grid gap-4 sm:grid-cols-2">
-              <FormField htmlFor="component-batch-manufacture-date" label="Manufacture date" hint="Optional">
+              <FormField error={formError.includes("Manufacture date") ? formError : undefined} htmlFor="component-batch-manufacture-date" label="Manufacture date" hint="Optional">
                 <Input id="component-batch-manufacture-date" onChange={(event) => setDraft({ ...draft, manufacture_date: event.target.value })} type="date" value={draft.manufacture_date} />
               </FormField>
-              <FormField htmlFor="component-batch-expiry-date" label="Expiry date" hint="Optional">
+              <FormField error={formError.includes("Expiry date") ? formError : undefined} htmlFor="component-batch-expiry-date" label="Expiry date" hint="Optional">
                 <Input id="component-batch-expiry-date" onChange={(event) => setDraft({ ...draft, expiry_date: event.target.value })} type="date" value={draft.expiry_date} />
               </FormField>
             </div>
@@ -282,10 +340,10 @@ export function ComponentBatchesSection() {
                 </Select>
               </FormField>
             </div>
-            {formError && !formError.includes("Batch number") && !formError.includes("already exists") && !formError.includes("component") && !formError.includes("Quantity") && <p className="text-xs font-medium text-red-700" role="alert">{formError}</p>}
+            {formError && !formError.includes("Batch number") && !formError.includes("already exists") && !formError.includes("component") && !formError.includes("Quantity") && !formError.includes("Manufacture date") && !formError.includes("Expiry date") && <p className="text-xs font-medium text-red-700" role="alert">{formError}</p>}
             <div className="flex flex-col-reverse gap-2 border-t border-line pt-4 sm:flex-row sm:justify-end">
-              <Button onClick={() => setActiveDialog(null)} variant="outline">Cancel</Button>
-              <Button disabled={components.length === 0} type="submit">{activeDialog.id === null ? "Add batch" : "Save changes"}</Button>
+              <Button disabled={saving} onClick={() => setActiveDialog(null)} variant="outline">Cancel</Button>
+              <Button disabled={saving || loading || Boolean(loadError) || components.length === 0} type="submit">{saving ? "Saving…" : activeDialog.id === null ? "Add batch" : "Save changes"}</Button>
             </div>
           </form>
         </Modal>
@@ -310,11 +368,12 @@ export function ComponentBatchesSection() {
 
       {activeDialog?.kind === "delete" && selectedBatch && (
         <ConfirmDialog
-          blockedReason={blockedReason}
-          description={`Delete component batch ${selectedBatch.batch_number}? This removes it from temporary mock data.`}
-          onClose={() => setActiveDialog(null)}
+          description={`Delete component batch ${selectedBatch.batch_number} from MySQL? Product compositions or recalls may prevent deletion.`}
+          onClose={() => !deleting && setActiveDialog(null)}
           onConfirm={confirmDelete}
           title="Delete component batch"
+          confirmLabel={deleting ? "Deleting…" : "Delete component batch"}
+          pending={deleting}
         />
       )}
     </section>

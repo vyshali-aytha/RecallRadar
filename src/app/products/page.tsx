@@ -10,10 +10,18 @@ import { PageHeading } from "@/components/crud/page-heading";
 import { RowActions } from "@/components/crud/row-actions";
 import { Badge, Button, Input, Select } from "@/components/ui/primitives";
 import { Icon } from "@/components/ui/icon";
-import { createProduct as createProductAction, deleteProduct as deleteProductAction, getAllProducts, updateProduct as updateProductAction } from "@/lib/member-a-actions";
-import type { ProductInput, ProductRecord } from "@/lib/member-a-types";
-import { useMockData } from "@/lib/mock-data";
-import type { BomEntry } from "@/lib/mock-data";
+import {
+  createProduct as createProductAction,
+  createProductComponent as createProductComponentAction,
+  deleteProduct as deleteProductAction,
+  deleteProductComponent as deleteProductComponentAction,
+  getAllComponents,
+  getAllProductComponents,
+  getAllProducts,
+  updateProduct as updateProductAction,
+  updateProductComponent as updateProductComponentAction,
+} from "@/lib/member-a-actions";
+import type { ComponentRecord, ProductComponentInput, ProductComponentRecord, ProductInput, ProductRecord } from "@/lib/member-a-types";
 
 type ProductDraft = {
   name: string;
@@ -29,15 +37,19 @@ type ActiveDialog =
 
 const emptyDraft: ProductDraft = { name: "", category: "", sku: "" };
 
+function isValidBomQuantity(value: string) {
+  return /^\d{1,10}(?:\.\d{1,2})?$/.test(value.trim()) && Number(value) > 0;
+}
+
+function formatBomQuantity(value: string | number) {
+  const number = Number(value);
+  return Number.isFinite(number) ? number.toFixed(2) : String(value);
+}
+
 export default function ProductsPage() {
-  const {
-    components,
-    bomEntries,
-    addBomEntry,
-    updateBomEntry,
-    deleteBomEntry,
-  } = useMockData();
   const [products, setProducts] = useState<ProductRecord[]>([]);
+  const [components, setComponents] = useState<ComponentRecord[]>([]);
+  const [bomEntries, setBomEntries] = useState<ProductComponentRecord[]>([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [deleting, setDeleting] = useState(false);
@@ -47,8 +59,12 @@ export default function ProductsPage() {
   const [activeDialog, setActiveDialog] = useState<ActiveDialog>(null);
   const [draft, setDraft] = useState<ProductDraft>(emptyDraft);
   const [formError, setFormError] = useState("");
-  const [notice, setNotice] = useState("");
   const [feedback, setFeedback] = useState<{ kind: "success" | "error"; message: string } | null>(null);
+  const [bomLoading, setBomLoading] = useState(true);
+  const [bomSaving, setBomSaving] = useState(false);
+  const [bomDeletingComponentId, setBomDeletingComponentId] = useState<number | null>(null);
+  const [bomLoadError, setBomLoadError] = useState("");
+  const [bomFeedback, setBomFeedback] = useState<{ kind: "success" | "error"; message: string } | null>(null);
   const [addingBom, setAddingBom] = useState(false);
   const [bomComponentId, setBomComponentId] = useState("");
   const [bomQuantity, setBomQuantity] = useState("1.00");
@@ -74,10 +90,33 @@ export default function ProductsPage() {
     }
   }, []);
 
+  const refreshBomData = useCallback(async () => {
+    setBomLoading(true);
+    try {
+      const componentResult = await getAllComponents();
+      const bomResult = await getAllProductComponents();
+      const errors: string[] = [];
+      if (componentResult.success) setComponents(componentResult.data);
+      else errors.push(`Components: ${componentResult.error}`);
+      if (bomResult.success) setBomEntries(bomResult.data);
+      else errors.push(`Bill of Materials: ${bomResult.error}`);
+      setBomLoadError(errors.join(" "));
+    } catch {
+      setBomLoadError("BOM records and component options could not be loaded. Check the database connection and try again.");
+    } finally {
+      setBomLoading(false);
+    }
+  }, []);
+
   useEffect(() => {
     const timer = window.setTimeout(() => { void refreshProducts(); }, 0);
     return () => window.clearTimeout(timer);
   }, [refreshProducts]);
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => { void refreshBomData(); }, 0);
+    return () => window.clearTimeout(timer);
+  }, [refreshBomData]);
 
   const categories = useMemo(
     () => [...new Set(products.map((product) => product.category).filter((value): value is string => Boolean(value)))].sort(),
@@ -96,7 +135,7 @@ export default function ProductsPage() {
   const selectedProduct = activeDialog
     ? products.find((product) => product.product_id === activeDialog.id)
     : undefined;
-  const selectedBom: BomEntry[] = activeDialog?.kind === "view"
+  const selectedBom: ProductComponentRecord[] = activeDialog?.kind === "view"
     ? bomEntries.filter((entry) => entry.product_id === activeDialog.id)
     : [];
   const availableComponents = activeDialog?.kind === "view"
@@ -124,6 +163,7 @@ export default function ProductsPage() {
     setBomError("");
     setEditingComponentId(null);
     setRemovingBomId(null);
+    setBomFeedback(null);
     setActiveDialog({ kind: "view", id: product.product_id });
   }
 
@@ -197,39 +237,114 @@ export default function ProductsPage() {
     }
   }
 
-  function saveBomEntry(event: React.FormEvent<HTMLFormElement>) {
+  async function saveBomEntry(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    if (bomSaving || activeDialog?.kind !== "view") return;
     const componentId = Number(bomComponentId);
-    const quantity = Number(bomQuantity);
-    if (!componentId || !Number.isFinite(quantity) || quantity <= 0) {
-      setBomError("Choose a component and enter a quantity greater than zero.");
+    if (!products.some((product) => product.product_id === activeDialog.id)) {
+      setBomError("The selected product is no longer available. Refresh the product list and try again.");
       return;
     }
-    if (activeDialog?.kind !== "view") return;
-    addBomEntry({ product_id: activeDialog.id, component_id: componentId, quantity_required: quantity });
-    setAddingBom(false);
-    setBomComponentId("");
-    setBomQuantity("1.00");
-    setBomError("");
-    setNotice("Component added to the BOM in mock data.");
-  }
-
-  function saveBomEdit(productId: number, componentId: number) {
-    const quantity = Number(editingQuantity);
-    if (!Number.isFinite(quantity) || quantity <= 0) {
-      setBomError("Quantity required must be greater than zero.");
+    if (!components.some((component) => component.component_id === componentId)) {
+      setBomError("Choose a valid component.");
       return;
     }
-    updateBomEntry(productId, componentId, quantity);
-    setEditingComponentId(null);
+    if (!isValidBomQuantity(bomQuantity)) {
+      setBomError("Quantity required must be greater than zero, have at most 10 integer digits, and no more than two decimal places.");
+      return;
+    }
+    if (selectedBom.some((entry) => entry.component_id === componentId)) {
+      setBomError("This component is already in the selected product’s BOM.");
+      return;
+    }
+
+    const record: ProductComponentInput = {
+      product_id: activeDialog.id,
+      component_id: componentId,
+      quantity_required: bomQuantity,
+    };
+    setBomSaving(true);
     setBomError("");
-    setNotice("BOM quantity updated in mock data.");
+    setBomFeedback(null);
+    try {
+      const result = await createProductComponentAction(record);
+      if (!result.success) {
+        setBomError(result.error);
+        setBomFeedback({ kind: "error", message: result.error });
+        return;
+      }
+      setAddingBom(false);
+      setBomComponentId("");
+      setBomQuantity("1.00");
+      setBomError("");
+      setBomFeedback({ kind: "success", message: "Component added to the product BOM in MySQL." });
+      await refreshBomData();
+    } catch {
+      const message = "The BOM entry could not be added. Check the database connection and try again.";
+      setBomError(message);
+      setBomFeedback({ kind: "error", message });
+    } finally {
+      setBomSaving(false);
+    }
   }
 
-  function removeBomEntry(productId: number, componentId: number) {
-    deleteBomEntry(productId, componentId);
-    setRemovingBomId(null);
-    setNotice("BOM entry removed from mock data.");
+  async function saveBomEdit(productId: number, componentId: number) {
+    if (bomSaving) return;
+    if (!products.some((product) => product.product_id === productId) || !components.some((component) => component.component_id === componentId)) {
+      setBomError("The selected product or component is no longer available. Refresh the records and try again.");
+      return;
+    }
+    if (!isValidBomQuantity(editingQuantity)) {
+      setBomError("Quantity required must be greater than zero, have at most 10 integer digits, and no more than two decimal places.");
+      return;
+    }
+
+    setBomSaving(true);
+    setBomError("");
+    setBomFeedback(null);
+    try {
+      const result = await updateProductComponentAction(productId, componentId, editingQuantity);
+      if (!result.success) {
+        setBomError(result.error);
+        setBomFeedback({ kind: "error", message: result.error });
+        return;
+      }
+      setEditingComponentId(null);
+      setBomError("");
+      setBomFeedback({ kind: "success", message: "BOM quantity updated in MySQL." });
+      await refreshBomData();
+    } catch {
+      const message = "The BOM quantity could not be updated. Check the database connection and try again.";
+      setBomError(message);
+      setBomFeedback({ kind: "error", message });
+    } finally {
+      setBomSaving(false);
+    }
+  }
+
+  async function removeBomEntry(productId: number, componentId: number) {
+    if (bomDeletingComponentId !== null) return;
+    setBomDeletingComponentId(componentId);
+    setBomError("");
+    setBomFeedback(null);
+    try {
+      const result = await deleteProductComponentAction(productId, componentId);
+      if (!result.success) {
+        setBomError(result.error);
+        setBomFeedback({ kind: "error", message: result.error });
+        return;
+      }
+      setRemovingBomId(null);
+      setBomError("");
+      setBomFeedback({ kind: "success", message: "BOM relationship deleted from MySQL." });
+      await refreshBomData();
+    } catch {
+      const message = "The BOM relationship could not be deleted. Check the database connection and try again.";
+      setBomError(message);
+      setBomFeedback({ kind: "error", message });
+    } finally {
+      setBomDeletingComponentId(null);
+    }
   }
 
   const columns = [
@@ -278,7 +393,7 @@ export default function ProductsPage() {
       />
       <div className="flex flex-wrap items-center gap-2.5 rounded-xl border border-sage bg-sage/45 px-3.5 py-3 text-xs text-forest" role="note">
         <Icon name="database" size={15} />
-        <span>Product records are loaded from MySQL. BOM edits remain in temporary mock data for now.</span>
+        <span>Product records, components and BOM relationships are loaded from MySQL.</span>
       </div>
       {feedback && (
         <div className={`flex items-center justify-between rounded-xl px-4 py-3 text-xs font-medium ${feedback.kind === "success" ? "border border-sage bg-sage/45 text-forest" : "border border-red-200 bg-red-50 text-red-800"}`} role={feedback.kind === "success" ? "status" : "alert"}>
@@ -292,13 +407,6 @@ export default function ProductsPage() {
           <Button className="min-h-9 shrink-0" disabled={loading} onClick={() => void refreshProducts()} size="sm" variant="outline">{loading ? "Loading…" : "Retry"}</Button>
         </div>
       )}
-      {notice && (
-        <div className="flex items-center justify-between rounded-xl border border-sage bg-sage/45 px-4 py-3 text-xs font-medium text-forest" role="status">
-          <span>{notice}</span>
-          <button aria-label="Dismiss message" className="ml-3 text-forest/70 hover:text-forest" onClick={() => setNotice("")} type="button"><Icon name="close" size={15} /></button>
-        </div>
-      )}
-
       <div className="flex flex-col gap-3 rounded-2xl border border-line bg-white p-3 shadow-card sm:flex-row sm:items-center sm:p-4">
         <label className="relative block w-full sm:max-w-sm">
           <span className="sr-only">Search products</span>
@@ -360,11 +468,24 @@ export default function ProductsPage() {
                 <p className="mt-1 text-[11px] text-muted">Components and quantities required for one product.</p>
               </div>
               {!addingBom && (
-                <Button disabled={availableComponents.length === 0} onClick={() => { setAddingBom(true); setBomError(""); }} size="sm" variant="secondary">
+                <Button disabled={bomLoading || Boolean(bomLoadError) || bomSaving || availableComponents.length === 0} onClick={() => { setAddingBom(true); setBomError(""); }} size="sm" variant="secondary">
                   <span className="text-base leading-none">+</span>Add component
                 </Button>
               )}
             </div>
+
+            {bomFeedback && (
+              <div className={`mt-3 flex items-center justify-between rounded-xl px-3.5 py-2.5 text-xs font-medium ${bomFeedback.kind === "success" ? "border border-sage bg-sage/45 text-forest" : "border border-red-200 bg-red-50 text-red-800"}`} role={bomFeedback.kind === "success" ? "status" : "alert"}>
+                <span>{bomFeedback.message}</span>
+                <button aria-label="Dismiss BOM message" className="ml-3 opacity-70 hover:opacity-100" onClick={() => setBomFeedback(null)} type="button"><Icon name="close" size={14} /></button>
+              </div>
+            )}
+            {bomLoadError && (
+              <div className="mt-3 flex flex-col gap-2 rounded-xl border border-red-200 bg-red-50 px-3.5 py-3 text-xs text-red-800 sm:flex-row sm:items-center sm:justify-between" role="alert">
+                <span>Bill of Materials could not be loaded: {bomLoadError}</span>
+                <Button className="min-h-8 shrink-0" disabled={bomLoading} onClick={() => void refreshBomData()} size="sm" variant="outline">{bomLoading ? "Loading…" : "Retry"}</Button>
+              </div>
+            )}
 
             {addingBom && (
               <form className="mt-4 grid gap-3 rounded-xl border border-sage bg-sage/20 p-3 sm:grid-cols-[1fr_145px_auto] sm:items-end" onSubmit={saveBomEntry}>
@@ -375,23 +496,28 @@ export default function ProductsPage() {
                   </Select>
                 </FormField>
                 <FormField error={bomError && bomComponentId ? bomError : undefined} htmlFor="bom-quantity" label="Quantity required" required>
-                  <Input id="bom-quantity" min="0.01" onChange={(event) => setBomQuantity(event.target.value)} required step="0.01" type="number" value={bomQuantity} />
+                  <Input id="bom-quantity" max="9999999999.99" min="0.01" onChange={(event) => setBomQuantity(event.target.value)} required step="0.01" type="number" value={bomQuantity} />
                 </FormField>
                 <div className="flex gap-2 sm:pb-0.5">
-                  <Button size="sm" type="submit">Add</Button>
-                  <Button onClick={() => { setAddingBom(false); setBomError(""); }} size="sm" variant="outline">Cancel</Button>
+                  <Button disabled={bomSaving || bomLoading || Boolean(bomLoadError)} size="sm" type="submit">{bomSaving ? "Saving…" : "Add"}</Button>
+                  <Button disabled={bomSaving} onClick={() => { setAddingBom(false); setBomError(""); }} size="sm" variant="outline">Cancel</Button>
                 </div>
               </form>
             )}
 
             {bomError && !addingBom && <p className="mt-3 text-xs font-medium text-red-700" role="alert">{bomError}</p>}
 
-            {selectedBom.length === 0 ? (
+            {bomLoading && selectedBom.length === 0 ? (
+              <div className="mt-4 rounded-xl border border-dashed border-line bg-[#FBFBF8] px-4 py-8 text-center" role="status">
+                <p className="text-xs font-semibold text-ink">Loading BOM records</p>
+                <p className="mt-1 text-[11px] text-muted">Loading this product’s component recipe from MySQL…</p>
+              </div>
+            ) : !bomLoadError && selectedBom.length === 0 ? (
               <div className="mt-4 rounded-xl border border-dashed border-line bg-[#FBFBF8] px-4 py-8 text-center">
                 <p className="text-xs font-semibold text-ink">No components in this BOM</p>
                 <p className="mt-1 text-[11px] text-muted">Add a component and its required quantity.</p>
               </div>
-            ) : (
+            ) : selectedBom.length > 0 ? (
               <div className="mt-4 overflow-hidden rounded-xl border border-line">
                 <div className="grid grid-cols-[1fr_115px_132px] bg-[#FBFBF8] px-3.5 py-2.5 text-[10px] font-semibold uppercase tracking-[0.12em] text-muted sm:grid-cols-[1fr_140px_160px]">
                   <span>Component</span><span>Qty / product</span><span className="text-right">Actions</span>
@@ -406,24 +532,24 @@ export default function ProductsPage() {
                       <div className="grid grid-cols-[1fr_115px_132px] items-center gap-2 px-3.5 py-3 sm:grid-cols-[1fr_140px_160px]" key={entry.component_id}>
                         <span className="min-w-0 truncate text-xs font-medium text-ink">{component.name}</span>
                         {isEditing ? (
-                          <Input aria-label={`Quantity required for ${component.name}`} className="min-h-9 px-2 text-xs" min="0.01" onChange={(event) => setEditingQuantity(event.target.value)} step="0.01" type="number" value={editingQuantity} />
+                          <Input aria-label={`Quantity required for ${component.name}`} className="min-h-9 px-2 text-xs" max="9999999999.99" min="0.01" onChange={(event) => setEditingQuantity(event.target.value)} step="0.01" type="number" value={editingQuantity} />
                         ) : (
-                          <span className="font-mono text-xs text-ink/75">{entry.quantity_required.toFixed(2)}</span>
+                          <span className="font-mono text-xs text-ink/75">{formatBomQuantity(entry.quantity_required)}</span>
                         )}
                         <div className="flex justify-end gap-1">
                           {isRemoving ? (
                             <>
-                              <button className="rounded-md px-2 py-1 text-[10px] font-semibold text-red-700 hover:bg-red-50" onClick={() => removeBomEntry(entry.product_id, entry.component_id)} type="button">Remove</button>
-                              <button className="rounded-md px-2 py-1 text-[10px] font-medium text-muted hover:bg-stone-100" onClick={() => setRemovingBomId(null)} type="button">Keep</button>
+                              <button className="rounded-md px-2 py-1 text-[10px] font-semibold text-red-700 hover:bg-red-50 disabled:opacity-50" disabled={bomDeletingComponentId !== null} onClick={() => void removeBomEntry(entry.product_id, entry.component_id)} type="button">{bomDeletingComponentId === entry.component_id ? "Removing…" : "Remove"}</button>
+                              <button className="rounded-md px-2 py-1 text-[10px] font-medium text-muted hover:bg-stone-100 disabled:opacity-50" disabled={bomDeletingComponentId !== null} onClick={() => setRemovingBomId(null)} type="button">Keep</button>
                             </>
                           ) : isEditing ? (
                             <>
-                              <button className="rounded-md px-2 py-1 text-[10px] font-semibold text-forest hover:bg-sage/50" onClick={() => saveBomEdit(entry.product_id, entry.component_id)} type="button">Save</button>
-                              <button className="rounded-md px-2 py-1 text-[10px] font-medium text-muted hover:bg-stone-100" onClick={() => setEditingComponentId(null)} type="button">Cancel</button>
+                              <button className="rounded-md px-2 py-1 text-[10px] font-semibold text-forest hover:bg-sage/50 disabled:opacity-50" disabled={bomSaving} onClick={() => void saveBomEdit(entry.product_id, entry.component_id)} type="button">{bomSaving ? "Saving…" : "Save"}</button>
+                              <button className="rounded-md px-2 py-1 text-[10px] font-medium text-muted hover:bg-stone-100 disabled:opacity-50" disabled={bomSaving} onClick={() => setEditingComponentId(null)} type="button">Cancel</button>
                             </>
                           ) : (
                             <>
-                              <button className="rounded-md px-2 py-1 text-[10px] font-semibold text-forest hover:bg-sage/50" onClick={() => { setEditingComponentId(entry.component_id); setEditingQuantity(entry.quantity_required.toFixed(2)); setBomError(""); }} type="button">Edit</button>
+                              <button className="rounded-md px-2 py-1 text-[10px] font-semibold text-forest hover:bg-sage/50 disabled:opacity-50" disabled={bomSaving || bomDeletingComponentId !== null} onClick={() => { setEditingComponentId(entry.component_id); setEditingQuantity(formatBomQuantity(entry.quantity_required)); setBomError(""); }} type="button">Edit</button>
                               <button className="rounded-md px-2 py-1 text-[10px] font-medium text-muted hover:bg-red-50 hover:text-red-700" onClick={() => setRemovingBomId(entry.component_id)} type="button">Remove</button>
                             </>
                           )}
@@ -433,7 +559,7 @@ export default function ProductsPage() {
                   })}
                 </div>
               </div>
-            )}
+            ) : null}
             {bomError && editingComponentId !== null && <p className="mt-2 text-xs font-medium text-red-700" role="alert">{bomError}</p>}
             {availableComponents.length === 0 && selectedBom.length > 0 && !addingBom && (
               <p className="mt-2 text-[11px] text-muted">All available components are already in this BOM.</p>

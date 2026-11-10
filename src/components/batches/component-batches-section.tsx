@@ -12,6 +12,7 @@ import { Button, Input, Select } from "@/components/ui/primitives";
 import { Icon } from "@/components/ui/icon";
 import { createComponentBatch, deleteComponentBatch, getAllComponentBatches, getAllComponents, updateComponentBatch } from "@/lib/member-a-actions";
 import type { ComponentBatchInput, ComponentBatchRecord, ComponentRecord } from "@/lib/member-a-types";
+import { notifyApplicationDataChanged } from "@/lib/member-b-client";
 
 type ComponentBatchDraft = {
   batch_number: string;
@@ -165,6 +166,7 @@ export function ComponentBatchesSection() {
       }
       setActiveDialog(null);
       setFeedback({ kind: "success", message: editId !== null ? `${batchNumber} was updated in MySQL.` : `${batchNumber} was added to MySQL.` });
+      notifyApplicationDataChanged();
       await refreshData();
     } catch {
       setFormError("The component batch could not be saved. Check the database connection and try again.");
@@ -186,6 +188,7 @@ export function ComponentBatchesSection() {
       }
       setActiveDialog(null);
       setFeedback({ kind: "success", message: `${selectedBatch.batch_number} was deleted from MySQL.` });
+      notifyApplicationDataChanged();
       await refreshData();
     } catch {
       setActiveDialog(null);

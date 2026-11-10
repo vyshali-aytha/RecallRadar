@@ -18,6 +18,7 @@ import {
   updateProductBatch,
 } from "@/lib/member-a-actions";
 import type { ProductBatchInput, ProductBatchRecord, ProductRecord } from "@/lib/member-a-types";
+import { notifyApplicationDataChanged } from "@/lib/member-b-client";
 
 type ProductBatchDraft = {
   batch_number: string;
@@ -171,6 +172,7 @@ export function ProductBatchesSection() {
       }
       setActiveDialog(null);
       setFeedback({ kind: "success", message: editId === null ? `${batchNumber} was added to MySQL.` : `${batchNumber} was updated in MySQL.` });
+      notifyApplicationDataChanged();
       await refreshRecords();
     } catch {
       setFormError("The product batch could not be saved. Check the database connection and try again.");
@@ -192,6 +194,7 @@ export function ProductBatchesSection() {
       }
       setActiveDialog(null);
       setFeedback({ kind: "success", message: `${selectedBatch.batch_number} was deleted from MySQL.` });
+      notifyApplicationDataChanged();
       await refreshRecords();
     } catch {
       setActiveDialog(null);

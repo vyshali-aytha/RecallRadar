@@ -26,6 +26,7 @@ import type {
   ProductBatchRecord,
   ProductRecord,
 } from "@/lib/member-a-types";
+import { notifyApplicationDataChanged } from "@/lib/member-b-client";
 
 type ActiveDialog =
   | { kind: "add" }
@@ -232,6 +233,7 @@ export function BatchCompositionSection() {
       }
       setActiveDialog(null);
       setFeedback({ kind: "success", message: "Component batch added to the product batch composition in MySQL." });
+      notifyApplicationDataChanged();
       await refreshRecords();
     } catch {
       setFormError("The composition could not be added. Check the database connection and try again.");
@@ -265,6 +267,7 @@ export function BatchCompositionSection() {
       }
       setActiveDialog(null);
       setFeedback({ kind: "success", message: "Composition quantity updated in MySQL." });
+      notifyApplicationDataChanged();
       await refreshRecords();
     } catch {
       setFormError("The composition quantity could not be updated. Check the database connection and try again.");
@@ -286,6 +289,7 @@ export function BatchCompositionSection() {
       }
       setActiveDialog(null);
       setFeedback({ kind: "success", message: "Composition relationship removed from MySQL." });
+      notifyApplicationDataChanged();
       await refreshRecords();
     } catch {
       setActiveDialog(null);

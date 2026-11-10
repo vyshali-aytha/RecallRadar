@@ -3,13 +3,13 @@ import { NextResponse } from 'next/server';
 import { runAuthRuntimeTestHarness } from '@/lib/dev-auth-runtime-test';
 
 export async function POST() {
-  if (process.env.NODE_ENV === 'production') {
+  if (process.env.NODE_ENV !== 'development') {
     return NextResponse.json(
       {
         success: false,
-        error: 'Development auth runtime tests are disabled in production.',
+        error: 'Not found.',
       },
-      { status: 403 }
+      { status: 404 }
     );
   }
 
@@ -48,6 +48,9 @@ export async function POST() {
 }
 
 export async function GET() {
+  if (process.env.NODE_ENV !== 'development') {
+    return NextResponse.json({ success: false, error: 'Not found.' }, { status: 404 });
+  }
   return NextResponse.json(
     {
       success: false,

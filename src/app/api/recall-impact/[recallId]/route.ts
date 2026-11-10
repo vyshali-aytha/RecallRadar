@@ -25,13 +25,27 @@ export async function GET(
 
     const result = await getRecallImpact(parsedId);
 
-    if (result.error) {
+    if (result.error === 'Invalid recall ID.') {
+      return NextResponse.json(
+        { success: false, error: result.error },
+        { status: 400 }
+      );
+    }
+
+    if (result.error === 'Recall not found in MySQL.') {
       return NextResponse.json(
         {
           success: false,
-          error: result.error,
+          error: 'Recall not found.',
         },
         { status: 404 }
+      );
+    }
+
+    if (result.error) {
+      return NextResponse.json(
+        { success: false, error: 'Recall impact analysis is unavailable.' },
+        { status: 500 }
       );
     }
 
@@ -39,18 +53,17 @@ export async function GET(
       status: 200,
     });
   } catch (error) {
-    const message = error instanceof Error ? error.message : 'Unexpected error';
-    const status =
-      message.includes('Authentication required') || message.includes('unauthorized')
-        ? 401
-        : message.includes('Insufficient role permissions') || message.includes('forbidden')
-          ? 403
-          : 500;
+    const message = error instanceof Error ? error.message : '';
+    const status = message === 'Authentication required.'
+      ? 401
+      : message === 'Insufficient role permissions.'
+        ? 403
+        : 500;
 
     return NextResponse.json(
       {
         success: false,
-        error: message,
+        error: status === 401 ? 'Authentication required.' : status === 403 ? 'Insufficient permissions.' : 'Recall impact analysis is unavailable.',
       },
       { status }
     );

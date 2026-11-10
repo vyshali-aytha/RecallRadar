@@ -86,6 +86,63 @@ export type RecallImpactInput = {
   product_batch_id: number;
 };
 
+export type DistributorRecord = {
+  distributor_id: number;
+  name: string;
+  region: string | null;
+  contact_email: string | null;
+};
+
+export type ShipmentRecord = {
+  shipment_id: number;
+  shipment_date: string | Date | null;
+  quantity_shipped: number;
+  status: string;
+  distributor_id: number;
+  product_batch_id: number;
+};
+
+export type InventoryLocationRecord = {
+  location_id: number;
+  name: string;
+  type: string | null;
+  address: string | null;
+};
+
+export type InventoryRecord = {
+  inventory_id: number;
+  quantity_on_hand: number;
+  last_updated: string | Date;
+  product_batch_id: number;
+  location_id: number;
+};
+
+export type AppUserRecord = {
+  user_id: number;
+  name: string;
+  email: string;
+  role: string;
+};
+
+export type RecallRecord = {
+  recall_id: number;
+  recall_date: string | Date;
+  reason: string | null;
+  severity: string | null;
+  status: string;
+  user_id: number;
+  component_id: number | null;
+  component_batch_id: number | null;
+};
+
+export type RecallImpactRecord = {
+  recall_impact_id: number;
+  identified_date: string | Date;
+  impact_type: string;
+  recall_id: number;
+  product_batch_id: number;
+};
+
 export async function createDistributor(db: DbExecutor, input: DistributorInput) {
   if (!input.name || !input.name.trim()) {
     throw new Error('Distributor name is required.');
@@ -101,7 +158,7 @@ export async function createDistributor(db: DbExecutor, input: DistributorInput)
 }
 
 export async function getAllDistributors(db: DbExecutor) {
-  return fetchAll(db, `SELECT * FROM distributor ORDER BY distributor_id`);
+  return fetchAll<DistributorRecord>(db, `SELECT * FROM distributor ORDER BY distributor_id`);
 }
 
 export async function getDistributorById(db: DbExecutor, distributorId: number) {
@@ -109,7 +166,7 @@ export async function getDistributorById(db: DbExecutor, distributorId: number) 
     throw new Error('Distributor ID must be a positive integer.');
   }
 
-  return fetchOne(db, `SELECT * FROM distributor WHERE distributor_id = ?`, [distributorId]);
+  return fetchOne<DistributorRecord>(db, `SELECT * FROM distributor WHERE distributor_id = ?`, [distributorId]);
 }
 
 export async function updateDistributor(db: DbExecutor, distributorId: number, input: Partial<DistributorInput>) {
@@ -171,7 +228,7 @@ export async function createShipment(db: DbExecutor, input: ShipmentInput) {
 }
 
 export async function getAllShipments(db: DbExecutor) {
-  return fetchAll(db, `SELECT * FROM shipment ORDER BY shipment_id`);
+  return fetchAll<ShipmentRecord>(db, `SELECT * FROM shipment ORDER BY shipment_id`);
 }
 
 export async function getShipmentById(db: DbExecutor, shipmentId: number) {
@@ -179,7 +236,7 @@ export async function getShipmentById(db: DbExecutor, shipmentId: number) {
     throw new Error('Shipment ID must be a positive integer.');
   }
 
-  return fetchOne(db, `SELECT * FROM shipment WHERE shipment_id = ?`, [shipmentId]);
+  return fetchOne<ShipmentRecord>(db, `SELECT * FROM shipment WHERE shipment_id = ?`, [shipmentId]);
 }
 
 export async function updateShipment(db: DbExecutor, shipmentId: number, input: Partial<ShipmentInput>) {
@@ -254,7 +311,7 @@ export async function createInventoryLocation(db: DbExecutor, input: InventoryLo
 }
 
 export async function getAllInventoryLocations(db: DbExecutor) {
-  return fetchAll(db, `SELECT * FROM inventory_location ORDER BY location_id`);
+  return fetchAll<InventoryLocationRecord>(db, `SELECT * FROM inventory_location ORDER BY location_id`);
 }
 
 export async function getInventoryLocationById(db: DbExecutor, locationId: number) {
@@ -262,7 +319,7 @@ export async function getInventoryLocationById(db: DbExecutor, locationId: numbe
     throw new Error('Inventory location ID must be a positive integer.');
   }
 
-  return fetchOne(db, `SELECT * FROM inventory_location WHERE location_id = ?`, [locationId]);
+  return fetchOne<InventoryLocationRecord>(db, `SELECT * FROM inventory_location WHERE location_id = ?`, [locationId]);
 }
 
 export async function updateInventoryLocation(db: DbExecutor, locationId: number, input: Partial<InventoryLocationInput>) {
@@ -332,7 +389,7 @@ export async function createInventory(db: DbExecutor, input: InventoryInput) {
 }
 
 export async function getAllInventory(db: DbExecutor) {
-  return fetchAll(db, `SELECT * FROM inventory ORDER BY inventory_id`);
+  return fetchAll<InventoryRecord>(db, `SELECT * FROM inventory ORDER BY inventory_id`);
 }
 
 export async function getInventoryById(db: DbExecutor, inventoryId: number) {
@@ -340,7 +397,7 @@ export async function getInventoryById(db: DbExecutor, inventoryId: number) {
     throw new Error('Inventory ID must be a positive integer.');
   }
 
-  return fetchOne(db, `SELECT * FROM inventory WHERE inventory_id = ?`, [inventoryId]);
+  return fetchOne<InventoryRecord>(db, `SELECT * FROM inventory WHERE inventory_id = ?`, [inventoryId]);
 }
 
 export async function updateInventory(db: DbExecutor, inventoryId: number, input: Partial<InventoryInput>) {
@@ -421,7 +478,7 @@ export async function createAppUser(db: DbExecutor, input: AppUserInput) {
 }
 
 export async function getAllAppUsers(db: DbExecutor) {
-  return fetchAll(db, `SELECT user_id, name, email, role FROM app_user ORDER BY user_id`);
+  return fetchAll<AppUserRecord>(db, `SELECT user_id, name, email, role FROM app_user ORDER BY user_id`);
 }
 
 export async function getAppUserById(db: DbExecutor, userId: number) {
@@ -429,7 +486,7 @@ export async function getAppUserById(db: DbExecutor, userId: number) {
     throw new Error('App user ID must be a positive integer.');
   }
 
-  return fetchOne(db, `SELECT user_id, name, email, role FROM app_user WHERE user_id = ?`, [userId]);
+  return fetchOne<AppUserRecord>(db, `SELECT user_id, name, email, role FROM app_user WHERE user_id = ?`, [userId]);
 }
 
 export async function updateAppUser(db: DbExecutor, userId: number, input: Partial<AppUserInput>) {
@@ -496,13 +553,15 @@ export async function createRecall(db: DbExecutor, input: RecallInput) {
   if (!isPositiveInteger(input.user_id)) {
     throw new Error('User ID must be a positive integer.');
   }
-  if (input.component_id === undefined && input.component_batch_id === undefined) {
+  const componentId = input.component_id ?? null;
+  const componentBatchId = input.component_batch_id ?? null;
+  if (componentId === null && componentBatchId === null) {
     throw new Error('A recall must target either a component or a component batch.');
   }
-  if (input.component_id !== undefined && input.component_id !== null && !isPositiveInteger(input.component_id)) {
+  if (componentId !== null && !isPositiveInteger(componentId)) {
     throw new Error('Component ID must be a positive integer.');
   }
-  if (input.component_batch_id !== undefined && input.component_batch_id !== null && !isPositiveInteger(input.component_batch_id)) {
+  if (componentBatchId !== null && !isPositiveInteger(componentBatchId)) {
     throw new Error('Component batch ID must be a positive integer.');
   }
 
@@ -517,8 +576,8 @@ export async function createRecall(db: DbExecutor, input: RecallInput) {
       normalizeOptionalString(input.severity),
       input.status ?? 'open',
       input.user_id,
-      input.component_id ?? null,
-      input.component_batch_id ?? null,
+      componentId,
+      componentBatchId,
     ]
   );
 
@@ -526,7 +585,7 @@ export async function createRecall(db: DbExecutor, input: RecallInput) {
 }
 
 export async function getAllRecalls(db: DbExecutor) {
-  return fetchAll(db, `SELECT * FROM recall ORDER BY recall_id`);
+  return fetchAll<RecallRecord>(db, `SELECT * FROM recall ORDER BY recall_id`);
 }
 
 export async function getRecallById(db: DbExecutor, recallId: number) {
@@ -534,7 +593,7 @@ export async function getRecallById(db: DbExecutor, recallId: number) {
     throw new Error('Recall ID must be a positive integer.');
   }
 
-  return fetchOne(db, `SELECT * FROM recall WHERE recall_id = ?`, [recallId]);
+  return fetchOne<RecallRecord>(db, `SELECT * FROM recall WHERE recall_id = ?`, [recallId]);
 }
 
 export async function updateRecall(db: DbExecutor, recallId: number, input: Partial<RecallInput>) {
@@ -545,6 +604,18 @@ export async function updateRecall(db: DbExecutor, recallId: number, input: Part
   const existing = await getRecallById(db, recallId);
   if (!existing) {
     throw new Error('Recall not found.');
+  }
+
+  const targetComponentId = input.component_id === undefined ? existing.component_id : input.component_id;
+  const targetComponentBatchId = input.component_batch_id === undefined ? existing.component_batch_id : input.component_batch_id;
+  if (targetComponentId === null && targetComponentBatchId === null) {
+    throw new Error('A recall must target either a component or a component batch.');
+  }
+  if (targetComponentId !== null && !isPositiveInteger(targetComponentId)) {
+    throw new Error('Component ID must be a positive integer.');
+  }
+  if (targetComponentBatchId !== null && !isPositiveInteger(targetComponentBatchId)) {
+    throw new Error('Component batch ID must be a positive integer.');
   }
 
   const updates: [string, unknown][] = [];
@@ -621,7 +692,7 @@ export async function createRecallImpact(db: DbExecutor, input: RecallImpactInpu
 }
 
 export async function getAllRecallImpacts(db: DbExecutor) {
-  return fetchAll(db, `SELECT * FROM recall_impact ORDER BY recall_impact_id`);
+  return fetchAll<RecallImpactRecord>(db, `SELECT * FROM recall_impact ORDER BY recall_impact_id`);
 }
 
 export async function getRecallImpactById(db: DbExecutor, recallImpactId: number) {
@@ -629,7 +700,7 @@ export async function getRecallImpactById(db: DbExecutor, recallImpactId: number
     throw new Error('Recall impact ID must be a positive integer.');
   }
 
-  return fetchOne(db, `SELECT * FROM recall_impact WHERE recall_impact_id = ?`, [recallImpactId]);
+  return fetchOne<RecallImpactRecord>(db, `SELECT * FROM recall_impact WHERE recall_impact_id = ?`, [recallImpactId]);
 }
 
 export async function updateRecallImpact(db: DbExecutor, recallImpactId: number, input: Partial<RecallImpactInput>) {

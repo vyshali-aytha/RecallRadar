@@ -1,4 +1,4 @@
-import 'server-only';
+'use server';
 
 import { requireMemberBReadAccess, requireMemberBWriteAccess } from './auth';
 import { pool } from './db';
@@ -47,7 +47,22 @@ import {
   updateShipment as updateShipmentCore,
 } from './member-b-core';
 
-export type { AppUserInput, DistributorInput, InventoryInput, InventoryLocationInput, RecallImpactInput, RecallInput, ShipmentInput } from './member-b-core';
+export type {
+  AppUserInput,
+  AppUserRecord,
+  DistributorInput,
+  DistributorRecord,
+  InventoryInput,
+  InventoryLocationInput,
+  InventoryLocationRecord,
+  InventoryRecord,
+  RecallImpactInput,
+  RecallImpactRecord,
+  RecallInput,
+  RecallRecord,
+  ShipmentInput,
+  ShipmentRecord,
+} from './member-b-core';
 
 async function ensureMemberBReadAccess() {
   await requireMemberBReadAccess();
@@ -231,42 +246,3 @@ export async function deleteRecallImpact(recallImpactId: number) {
   await ensureMemberBWriteAccess();
   return deleteRecallImpactCore(pool, recallImpactId);
 }
-
-export default {
-  createDistributor,
-  getAllDistributors,
-  getDistributorById,
-  updateDistributor,
-  deleteDistributor,
-  createShipment,
-  getAllShipments,
-  getShipmentById,
-  updateShipment,
-  deleteShipment,
-  createInventoryLocation,
-  getAllInventoryLocations,
-  getInventoryLocationById,
-  updateInventoryLocation,
-  deleteInventoryLocation,
-  createInventory,
-  getAllInventory,
-  getInventoryById,
-  updateInventory,
-  deleteInventory,
-  createAppUser,
-  getAllAppUsers,
-  getAppUserById,
-  updateAppUser,
-  deleteAppUser,
-  createRecall,
-  getAllRecalls,
-  getRecallById,
-  updateRecall,
-  deleteRecall,
-  createRecallImpact,
-  getAllRecallImpacts,
-  getRecallImpactById,
-  updateRecallImpact,
-  deleteRecallImpact,
-};
-

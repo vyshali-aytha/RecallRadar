@@ -1,32 +1,6 @@
 import { Badge, Card } from "@/components/ui/primitives";
-import { Icon, type IconName } from "@/components/ui/icon";
-
-const overviewItems: {
-  label: string;
-  detail: string;
-  icon: IconName;
-}[] = [
-  {
-    label: "Suppliers",
-    detail: "Supply partners",
-    icon: "truck",
-  },
-  {
-    label: "Products",
-    detail: "Product catalog",
-    icon: "box",
-  },
-  {
-    label: "Component batches",
-    detail: "Incoming lots",
-    icon: "layers",
-  },
-  {
-    label: "Recall exposure",
-    detail: "Impacted product lots",
-    icon: "shield",
-  },
-];
+import { Icon } from "@/components/ui/icon";
+import { DashboardMetrics } from "@/components/dashboard/dashboard-metrics";
 
 export default function Home() {
   return (
@@ -80,25 +54,10 @@ export default function Home() {
               Supply chain overview
             </h2>
           </div>
-          <Badge tone="neutral">DATA SOURCE NOT CONNECTED</Badge>
+          <Badge tone="sage">LIVE DATABASE SUMMARY</Badge>
         </div>
 
-        <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-          {overviewItems.map((item) => (
-            <Card className="flex min-h-[142px] flex-col justify-between" key={item.label}>
-              <div className="flex items-start justify-between gap-3">
-                <div>
-                  <p className="text-xs font-medium text-muted">{item.label}</p>
-                  <p className="mt-3 text-[28px] font-semibold leading-none tracking-tight text-ink">—</p>
-                </div>
-                <span className="flex size-9 items-center justify-center rounded-xl bg-sage/70 text-forest">
-                  <Icon name={item.icon} size={17} />
-                </span>
-              </div>
-              <p className="text-[11px] text-muted">{item.detail} · awaiting connection</p>
-            </Card>
-          ))}
-        </div>
+        <DashboardMetrics />
       </section>
 
       <section className="grid gap-4 lg:grid-cols-[1.35fr_0.65fr]">
@@ -118,7 +77,7 @@ export default function Home() {
             </span>
             <p className="mt-3 text-xs font-semibold text-ink">Your network will appear here</p>
             <p className="mt-1 max-w-sm text-[11px] leading-5 text-muted">
-              The interface is ready. Database connections and live records are not part of this stage.
+              Detailed graph-derived paths are available in the Recall Impact analysis view.
             </p>
           </div>
         </Card>

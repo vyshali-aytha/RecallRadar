@@ -1,18 +1,30 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { ConfirmDialog } from "@/components/crud/confirm-dialog";
 import { DataTable } from "@/components/crud/data-table";
 import { DetailField } from "@/components/crud/detail-field";
 import { FormField } from "@/components/crud/form-field";
 import { Modal } from "@/components/crud/modal";
-import { MockDataNotice } from "@/components/crud/mock-data-notice";
 import { PageHeading } from "@/components/crud/page-heading";
 import { RowActions } from "@/components/crud/row-actions";
 import { Badge, Button, Card, Input, Textarea } from "@/components/ui/primitives";
 import { Icon } from "@/components/ui/icon";
-import { useMockData } from "@/lib/mock-data";
-import type { RecallRecord } from "@/lib/mock-data";
+import {
+  createRecall,
+  deleteRecall,
+  getAllAppUsers,
+  getAllRecallImpacts,
+  getAllRecalls,
+  updateRecall,
+  type AppUserRecord,
+  type RecallImpactRecord,
+  type RecallRecord,
+} from "@/lib/member-b-actions";
+import { getAllComponentBatches, getAllComponents, getAllProductBatches, getAllProducts } from "@/lib/member-a-actions";
+import type { ComponentBatchRecord, ComponentRecord, ProductBatchRecord, ProductRecord } from "@/lib/member-a-types";
+import { useSession } from "@/lib/session-context";
+import { dateInputValue, notifyMemberBDataChanged, safeActionError } from "@/lib/member-b-client";
 
 type RecallDraft = {
   recall_date: string;
@@ -34,7 +46,16 @@ function statusTone(status: string): "sage" | "amber" | "neutral" {
 }
 
 export default function RecallsPage() {
-  const { recalls, recallImpacts, appUsers, components, componentBatches, productBatches, products, addRecall, updateRecall, deleteRecall } = useMockData();
+  const { user } = useSession();
+  const [recalls, setRecalls] = useState<RecallRecord[]>([]);
+  const [recallImpacts, setRecallImpacts] = useState<RecallImpactRecord[]>([]);
+  const [appUsers, setAppUsers] = useState<AppUserRecord[]>([]);
+  const [components, setComponents] = useState<ComponentRecord[]>([]);
+  const [componentBatches, setComponentBatches] = useState<ComponentBatchRecord[]>([]);
+  const [productBatches, setProductBatches] = useState<ProductBatchRecord[]>([]);
+  const [products, setProducts] = useState<ProductRecord[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState("");
   const [query, setQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState("all");
   const [severityFilter, setSeverityFilter] = useState("all");
@@ -42,6 +63,40 @@ export default function RecallsPage() {
   const [draft, setDraft] = useState<RecallDraft>(emptyDraft);
   const [formError, setFormError] = useState("");
   const [notice, setNotice] = useState("");
+  const refresh = useCallback(async () => {
+    setLoading(true);
+    setLoadError("");
+    try {
+      const [nextRecalls, nextImpacts, nextUsers, nextComponents, nextComponentBatches, nextProductBatches, nextProducts] = await Promise.all([
+        getAllRecalls(),
+        getAllRecallImpacts(),
+        getAllAppUsers(),
+        getAllComponents(),
+        getAllComponentBatches(),
+        getAllProductBatches(),
+        getAllProducts(),
+      ]);
+      if (!nextComponents.success) throw new Error(nextComponents.error);
+      if (!nextComponentBatches.success) throw new Error(nextComponentBatches.error);
+      if (!nextProductBatches.success) throw new Error(nextProductBatches.error);
+      if (!nextProducts.success) throw new Error(nextProducts.error);
+      setRecalls(nextRecalls);
+      setRecallImpacts(nextImpacts);
+      setAppUsers(nextUsers);
+      setComponents(nextComponents.data);
+      setComponentBatches(nextComponentBatches.data);
+      setProductBatches(nextProductBatches.data);
+      setProducts(nextProducts.data);
+    } catch (reason) {
+      setLoadError(safeActionError(reason, "Recall data could not be loaded."));
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+  useEffect(() => {
+    const timer = window.setTimeout(() => { void refresh(); }, 0);
+    return () => window.clearTimeout(timer);
+  }, [refresh]);
 
   const statusOptions = useMemo(() => [...new Set(recalls.map((recall) => recall.status))].sort((a, b) => a.localeCompare(b)), [recalls]);
   const severityOptions = useMemo(() => [...new Set(recalls.map((recall) => recall.severity).filter((value): value is string => Boolean(value)))].sort((a, b) => a.localeCompare(b)), [recalls]);
@@ -71,14 +126,14 @@ export default function RecallsPage() {
     : undefined;
 
   function openCreate() {
-    setDraft({ ...emptyDraft, user_id: appUsers[0] ? String(appUsers[0].user_id) : "" });
+    setDraft({ ...emptyDraft, recall_date: new Date().toISOString().slice(0, 10), user_id: user ? String(user.userId) : "" });
     setFormError("");
     setDialog({ kind: "form", id: null });
   }
 
   function openEdit(recall: RecallRecord) {
     setDraft({
-      recall_date: recall.recall_date,
+      recall_date: dateInputValue(recall.recall_date),
       reason: recall.reason ?? "",
       severity: recall.severity ?? "",
       status: recall.status,
@@ -90,13 +145,13 @@ export default function RecallsPage() {
     setDialog({ kind: "form", id: recall.recall_id });
   }
 
-  function saveRecall(event: React.FormEvent<HTMLFormElement>) {
+  async function saveRecall(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const userId = Number(draft.user_id);
     const componentId = draft.component_id ? Number(draft.component_id) : null;
     const componentBatchId = draft.component_batch_id ? Number(draft.component_batch_id) : null;
     if (!draft.recall_date) { setFormError("Recall date is required."); return; }
-    if (!appUsers.some((user) => user.user_id === userId)) { setFormError("Choose a user from the list."); return; }
+    if (!appUsers.some((record) => record.user_id === userId)) { setFormError("Choose a valid user."); return; }
     if (componentId === null && componentBatchId === null) { setFormError("Select a target component, component batch, or both."); return; }
     if (componentId !== null && !components.some((component) => component.component_id === componentId)) { setFormError("Choose an existing component."); return; }
     if (componentBatchId !== null && !componentBatches.some((batch) => batch.component_batch_id === componentBatchId)) { setFormError("Choose an existing component batch."); return; }
@@ -113,21 +168,33 @@ export default function RecallsPage() {
       component_id: componentId,
       component_batch_id: componentBatchId,
     };
-    if (dialog?.kind === "form" && dialog.id !== null) {
-      updateRecall(dialog.id, record);
-      setNotice(`Recall #${dialog.id} updated in temporary mock data.`);
-    } else {
-      const created = addRecall(record);
-      setNotice(`Recall #${created.recall_id} added to temporary mock data.`);
+    try {
+      if (dialog?.kind === "form" && dialog.id !== null) {
+        await updateRecall(dialog.id, record);
+        setNotice(`Recall #${dialog.id} updated.`);
+      } else {
+        await createRecall(record);
+        setNotice("Recall created.");
+      }
+      setDialog(null);
+      notifyMemberBDataChanged();
+      await refresh();
+    } catch (reason) {
+      setFormError(safeActionError(reason, "The recall could not be saved. Check the selected user and target records."));
     }
-    setDialog(null);
   }
 
-  function confirmDelete() {
+  async function confirmDelete() {
     if (dialog?.kind !== "delete" || deleteBlocked || !selectedRecall) return;
-    if (!deleteRecall(selectedRecall.recall_id)) return;
-    setNotice(`Recall #${selectedRecall.recall_id} removed from temporary mock data.`);
-    setDialog(null);
+    try {
+      await deleteRecall(selectedRecall.recall_id);
+      setNotice(`Recall #${selectedRecall.recall_id} removed.`);
+      setDialog(null);
+      notifyMemberBDataChanged();
+      await refresh();
+    } catch (reason) {
+      setLoadError(safeActionError(reason, "The recall could not be deleted. Related impact records may still exist."));
+    }
   }
 
   const componentLabel = (id: number | null) => id === null ? null : components.find((item) => item.component_id === id)?.name ?? "Unavailable component";
@@ -139,7 +206,7 @@ export default function RecallsPage() {
   };
   const columns = [
     { key: "id", label: "Recall ID", className: "w-24", render: (recall: RecallRecord) => <span className="font-mono text-xs text-muted">{recall.recall_id}</span> },
-    { key: "date", label: "Recall date", render: (recall: RecallRecord) => recall.recall_date },
+    { key: "date", label: "Recall date", render: (recall: RecallRecord) => dateInputValue(recall.recall_date) },
     { key: "component", label: "Target component", render: (recall: RecallRecord) => componentLabel(recall.component_id) ?? <span className="text-muted">—</span> },
     { key: "batch", label: "Target component batch", render: (recall: RecallRecord) => <span className="text-xs">{componentBatchLabel(recall.component_batch_id) ?? <span className="text-muted">—</span>}</span> },
     { key: "severity", label: "Severity", render: (recall: RecallRecord) => recall.severity ? <Badge tone={recall.severity.toLowerCase() === "high" || recall.severity.toLowerCase() === "critical" ? "amber" : "neutral"}>{recall.severity}</Badge> : <span className="text-muted">—</span> },
@@ -156,15 +223,16 @@ export default function RecallsPage() {
   ];
 
   return <div className="space-y-6">
-    <PageHeading action={<Button disabled={!appUsers.length} onClick={openCreate}><span className="text-lg leading-none">+</span>Add recall</Button>} description="Manage component safety events and review the finished product batches identified as affected." title="Recalls" />
-    <MockDataNotice />
+    <PageHeading action={<Button disabled={loading || Boolean(loadError) || !appUsers.length || !user} onClick={openCreate}><span className="text-lg leading-none">+</span>Add recall</Button>} description="Manage component safety events and review the finished product batches identified as affected." title="Recalls" />
+    {loading && <p className="text-xs text-muted" role="status">Loading recall records…</p>}
+    {loadError && <p className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-xs text-red-800" role="alert">{loadError}</p>}
     {notice && <div className="flex items-center justify-between rounded-xl border border-sage bg-sage/45 px-4 py-3 text-xs font-medium text-forest" role="status"><span>{notice}</span><button aria-label="Dismiss message" className="ml-3 text-forest/70 hover:text-forest" onClick={() => setNotice("")} type="button"><Icon name="close" size={15} /></button></div>}
 
-    <section aria-labelledby="recall-overview-heading" className="space-y-3"><div><p className="text-[11px] font-semibold uppercase tracking-[0.15em] text-muted">At a glance</p><h2 className="mt-1 text-lg font-semibold text-ink" id="recall-overview-heading">Recall overview</h2></div><div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">{metrics.map((metric) => <Card className="flex items-start justify-between gap-3 p-4 sm:p-5" key={metric.label}><div><p className="text-xs font-medium text-muted">{metric.label}</p><p className="mt-2 text-3xl font-semibold tracking-tight text-ink">{metric.value}</p><p className="mt-1.5 text-[11px] text-muted">{metric.note}</p></div><span className={`flex size-10 items-center justify-center rounded-xl ${metric.tone === "forest" ? "bg-forest text-white" : metric.tone === "amber" ? "bg-amber-soft text-amber-ink" : "bg-sage text-forest"}`}><Icon name={metric.icon} size={19} /></span></Card>)}</div></section>
+    <section aria-labelledby="recall-overview-heading" className="space-y-3"><div><p className="text-[11px] font-semibold uppercase tracking-[0.15em] text-muted">At a glance</p><h2 className="mt-1 text-lg font-semibold text-ink" id="recall-overview-heading">Recall overview</h2></div><div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">{metrics.map((metric) => <Card className="flex items-start justify-between gap-3 p-4 sm:p-5" key={metric.label}><div><p className="text-xs font-medium text-muted">{metric.label}</p><p className="mt-2 text-3xl font-semibold tracking-tight text-ink">{loading ? "…" : loadError ? "Unavailable" : metric.value}</p><p className="mt-1.5 text-[11px] text-muted">{metric.note}</p></div><span className={`flex size-10 items-center justify-center rounded-xl ${metric.tone === "forest" ? "bg-forest text-white" : metric.tone === "amber" ? "bg-amber-soft text-amber-ink" : "bg-sage text-forest"}`}><Icon name={metric.icon} size={19} /></span></Card>)}</div></section>
 
-    <section aria-labelledby="recall-list-heading" className="space-y-5"><div><p className="text-[11px] font-semibold uppercase tracking-[0.15em] text-muted">Recall register</p><h2 className="mt-1 text-lg font-semibold text-ink" id="recall-list-heading">All recalls</h2><p className="mt-1 text-xs text-muted">Search recall IDs, target names, batches and reasons. Status and severity values follow the stored mock records.</p></div>
-      <div className="flex flex-col gap-3 rounded-2xl border border-line bg-white p-3 shadow-card sm:flex-row sm:flex-wrap sm:p-4"><label className="relative block w-full sm:max-w-sm"><span className="sr-only">Search recalls</span><Icon className="absolute left-3.5 top-1/2 -translate-y-1/2 text-muted" name="search" size={16} /><Input className="pl-10" onChange={(event) => setQuery(event.target.value)} placeholder="Search ID, component, batch or reason" value={query} /></label><label className="w-full sm:max-w-[200px]"><span className="sr-only">Filter by status</span><select className="min-h-11 w-full rounded-xl border border-line bg-white px-3.5 text-sm text-ink shadow-sm" onChange={(event) => setStatusFilter(event.target.value)} value={statusFilter}><option value="all">All statuses</option>{statusOptions.map((status) => <option key={status} value={status}>{status.replaceAll("_", " ")}</option>)}</select></label><label className="w-full sm:max-w-[200px]"><span className="sr-only">Filter by severity</span><select className="min-h-11 w-full rounded-xl border border-line bg-white px-3.5 text-sm text-ink shadow-sm" onChange={(event) => setSeverityFilter(event.target.value)} value={severityFilter}><option value="all">All severities</option>{severityOptions.map((severity) => <option key={severity} value={severity}>{severity}</option>)}</select></label><span className="px-1 text-xs text-muted sm:ml-auto sm:self-center">{filteredRecalls.length} recalls</span></div>
-      <DataTable columns={columns} emptyDescription={query || statusFilter !== "all" || severityFilter !== "all" ? "Try another search or adjust the filters." : "Add a recall to begin recording a product safety event."} emptyTitle={filteredRecalls.length ? "No recalls match these filters" : "No recalls yet"} rowKey={(recall) => recall.recall_id} rows={filteredRecalls} />
+    <section aria-labelledby="recall-list-heading" className="space-y-5"><div><p className="text-[11px] font-semibold uppercase tracking-[0.15em] text-muted">Recall register</p><h2 className="mt-1 text-lg font-semibold text-ink" id="recall-list-heading">All recalls</h2><p className="mt-1 text-xs text-muted">Search recall IDs, target names, batches and reasons from the stored records.</p></div>
+      <div className="flex flex-col gap-3 rounded-2xl border border-line bg-white p-3 shadow-card sm:flex-row sm:flex-wrap sm:p-4"><label className="relative block w-full sm:max-w-sm"><span className="sr-only">Search recalls</span><Icon className="absolute left-3.5 top-1/2 -translate-y-1/2 text-muted" name="search" size={16} /><Input className="pl-10" onChange={(event) => setQuery(event.target.value)} placeholder="Search ID, component, batch or reason" value={query} /></label><label className="w-full sm:max-w-[200px]"><span className="sr-only">Filter by status</span><select className="min-h-11 w-full rounded-xl border border-line bg-white px-3.5 text-sm text-ink shadow-sm" onChange={(event) => setStatusFilter(event.target.value)} value={statusFilter}><option value="all">All statuses</option>{statusOptions.map((status) => <option key={status} value={status}>{status.replaceAll("_", " ")}</option>)}</select></label><label className="w-full sm:max-w-[200px]"><span className="sr-only">Filter by severity</span><select className="min-h-11 w-full rounded-xl border border-line bg-white px-3.5 text-sm text-ink shadow-sm" onChange={(event) => setSeverityFilter(event.target.value)} value={severityFilter}><option value="all">All severities</option>{severityOptions.map((severity) => <option key={severity} value={severity}>{severity}</option>)}</select></label><span className="px-1 text-xs text-muted sm:ml-auto sm:self-center">{loadError ? "Count unavailable" : loading ? "Loading count…" : `${filteredRecalls.length} recalls`}</span></div>
+      <DataTable columns={columns} emptyDescription={loadError ? "Recall records are unavailable until the database connection is restored." : loading ? "Recall records are loading." : query || statusFilter !== "all" || severityFilter !== "all" ? "Try another search or adjust the filters." : "Add a recall to begin recording a product safety event."} emptyTitle={loadError ? "Recalls unavailable" : loading ? "Loading recalls" : filteredRecalls.length ? "No recalls match these filters" : "No recalls yet"} footerLabel="Showing live MySQL records" rowKey={(recall) => recall.recall_id} rows={filteredRecalls} />
     </section>
 
     {dialog?.kind === "form" && <Modal description="A component, component batch, or both must be selected as the recall target." onClose={() => setDialog(null)} title={dialog.id === null ? "Add recall" : "Edit recall"} width="lg"><form className="space-y-4" onSubmit={saveRecall}>
@@ -175,8 +243,8 @@ export default function RecallsPage() {
       {formError && <p className="text-xs font-medium text-red-700" role="alert">{formError}</p>}<div className="flex flex-col-reverse gap-2 border-t border-line pt-4 sm:flex-row sm:justify-end"><Button onClick={() => setDialog(null)} variant="outline">Cancel</Button><Button disabled={!appUsers.length} type="submit">{dialog.id === null ? "Create recall" : "Save changes"}</Button></div>
     </form></Modal>}
 
-    {dialog?.kind === "view" && selectedRecall && <Modal description="Recall details and read-only affected batch records" onClose={() => setDialog(null)} title={`Recall #${selectedRecall.recall_id}`} width="lg"><div className="grid gap-3 sm:grid-cols-2"><DetailField label="Recall ID" value={selectedRecall.recall_id} /><DetailField label="Recall date" value={selectedRecall.recall_date} /><DetailField label="Reason" value={selectedRecall.reason} /><DetailField label="Severity" value={selectedRecall.severity} /><div className="rounded-xl border border-line bg-[#FBFBF8] px-3.5 py-3"><p className="text-[10px] font-semibold uppercase tracking-[0.13em] text-muted">Status</p><div className="mt-2"><Badge className="capitalize" tone={statusTone(selectedRecall.status)}>{selectedRecall.status.replaceAll("_", " ")}</Badge></div></div><DetailField label="Created by" value={appUsers.find((user) => user.user_id === selectedRecall.user_id)?.name} /><DetailField label="Target component" value={componentLabel(selectedRecall.component_id)} /><DetailField label="Target component batch" value={componentBatchLabel(selectedRecall.component_batch_id)} /></div>
-      <section className="mt-6"><h3 className="text-sm font-semibold text-ink">Associated recall impacts <span className="ml-1 text-xs font-normal text-muted">({selectedImpacts.length})</span></h3><p className="mt-1 text-xs text-muted">Read-only sample relationship data. Impact management belongs to the next stage.</p>{selectedImpacts.length ? <div className="mt-3 space-y-2">{selectedImpacts.map((impact) => { const batch = productBatches.find((item) => item.product_batch_id === impact.product_batch_id); const product = products.find((item) => item.product_id === batch?.product_id); return <div className="grid gap-2 rounded-xl border border-line bg-[#FBFBF8] p-3 sm:grid-cols-[1fr_auto] sm:items-center" key={impact.recall_impact_id}><div><p className="text-sm font-medium text-ink">{product?.name ?? "Unavailable product"}</p><p className="mt-1 font-mono text-xs text-muted">{batch?.batch_number ?? "Unavailable product batch"}</p></div><div className="sm:text-right"><p className="text-xs font-medium text-ink">{impact.impact_type}</p><p className="mt-1 text-[11px] text-muted">Identified {impact.identified_date}</p></div></div>; })}</div> : <p className="mt-3 rounded-xl border border-dashed border-line p-5 text-center text-xs text-muted">No impact records are associated with this recall.</p>}</section><div className="mt-5 flex justify-end"><Button onClick={() => openEdit(selectedRecall)} variant="outline">Edit recall</Button></div></Modal>}
+    {dialog?.kind === "view" && selectedRecall && <Modal description="Recall details and associated product batches" onClose={() => setDialog(null)} title={`Recall #${selectedRecall.recall_id}`} width="lg"><div className="grid gap-3 sm:grid-cols-2"><DetailField label="Recall ID" value={selectedRecall.recall_id} /><DetailField label="Recall date" value={dateInputValue(selectedRecall.recall_date)} /><DetailField label="Reason" value={selectedRecall.reason} /><DetailField label="Severity" value={selectedRecall.severity} /><div className="rounded-xl border border-line bg-[#FBFBF8] px-3.5 py-3"><p className="text-[10px] font-semibold uppercase tracking-[0.13em] text-muted">Status</p><div className="mt-2"><Badge className="capitalize" tone={statusTone(selectedRecall.status)}>{selectedRecall.status.replaceAll("_", " ")}</Badge></div></div><DetailField label="Created by" value={appUsers.find((user) => user.user_id === selectedRecall.user_id)?.name} /><DetailField label="Target component" value={componentLabel(selectedRecall.component_id)} /><DetailField label="Target component batch" value={componentBatchLabel(selectedRecall.component_batch_id)} /></div>
+      <section className="mt-6"><h3 className="text-sm font-semibold text-ink">Associated recall impacts <span className="ml-1 text-xs font-normal text-muted">({selectedImpacts.length})</span></h3><p className="mt-1 text-xs text-muted">Affected product batches currently stored for this recall.</p>{selectedImpacts.length ? <div className="mt-3 space-y-2">{selectedImpacts.map((impact: RecallImpactRecord) => { const batch = productBatches.find((item) => item.product_batch_id === impact.product_batch_id); const product = products.find((item) => item.product_id === batch?.product_id); return <div className="grid gap-2 rounded-xl border border-line bg-[#FBFBF8] p-3 sm:grid-cols-[1fr_auto] sm:items-center" key={impact.recall_impact_id}><div><p className="text-sm font-medium text-ink">{product?.name ?? "Unavailable product"}</p><p className="mt-1 font-mono text-xs text-muted">{batch?.batch_number ?? "Unavailable product batch"}</p></div><div className="sm:text-right"><p className="text-xs font-medium text-ink">{impact.impact_type}</p><p className="mt-1 text-[11px] text-muted">Identified {dateInputValue(impact.identified_date)}</p></div></div>; })}</div> : <p className="mt-3 rounded-xl border border-dashed border-line p-5 text-center text-xs text-muted">No impact records are associated with this recall.</p>}</section><div className="mt-5 flex justify-end"><Button onClick={() => openEdit(selectedRecall)} variant="outline">Edit recall</Button></div></Modal>}
 
     {dialog?.kind === "delete" && selectedRecall && <ConfirmDialog blockedReason={deleteBlocked} description={`Delete recall #${selectedRecall.recall_id}? Related impact records must be removed separately first.`} onClose={() => setDialog(null)} onConfirm={confirmDelete} title="Delete recall" />}
   </div>;

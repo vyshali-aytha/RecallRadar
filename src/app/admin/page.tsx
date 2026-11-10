@@ -4,18 +4,19 @@ import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { AdminSystemStatus } from "@/components/admin/admin-system-status";
+import { AdminSupplierUtilization } from "@/components/admin/admin-supplier-utilization";
 import { AdminUsersPanel } from "@/components/admin/admin-users-panel";
 import { Badge, Card } from "@/components/ui/primitives";
 import { Icon, type IconName } from "@/components/ui/icon";
 import { useSession } from "@/lib/session-context";
 
-type AdminSection = "overview" | "users" | "system" | "settings";
+type AdminSection = "overview" | "users" | "system" | "supplier-utilization";
 const items: { id: AdminSection | "recalls"; label: string; icon: IconName; href?: string }[] = [
   { id: "overview", label: "Overview", icon: "dashboard" },
   { id: "users", label: "User Management", icon: "users" },
   { id: "recalls", label: "Recall Management", icon: "shield", href: "/recalls" },
+  { id: "supplier-utilization", label: "Supplier Batch Utilization", icon: "chart" },
   { id: "system", label: "System Status", icon: "activity" },
-  { id: "settings", label: "Settings", icon: "sparkles" },
 ];
 
 function AdminLoading() {
@@ -99,7 +100,7 @@ export default function AdminPage() {
     </aside>
 
     <div className="min-h-screen lg:pl-[258px]">
-      <header className="sticky top-0 z-30 border-b border-[#e4e6df] bg-[#f4f3ed]/95 backdrop-blur"><div className="flex min-h-[78px] items-center justify-between gap-3 px-4 sm:px-7 lg:px-9"><div className="flex min-w-0 items-center gap-3"><button aria-label="Open admin navigation" className="flex size-10 items-center justify-center rounded-xl border border-[#dfe3dd] bg-white text-[#1e5045] lg:hidden" onClick={() => setSidebarOpen(true)} type="button"><Icon name="menu" size={18} /></button><div className="min-w-0"><p className="text-[9px] font-bold uppercase tracking-[0.17em] text-[#74807b]">RecallRadar <span className="px-1 text-[#c2c8c1]">/</span> Admin</p><h1 className="rr-heading mt-0.5 truncate text-[16px] font-bold text-[#1d2926] sm:text-lg">{active === "overview" ? "Overview" : active === "users" ? "User Management" : active === "system" ? "System Status" : "Settings"}</h1></div></div><div className="flex shrink-0 items-center gap-2 sm:gap-3"><div className="hidden text-right sm:block"><p className="max-w-40 truncate text-xs font-bold text-[#1d2926]">{user.name}</p><p className="mt-0.5 text-[9px] font-semibold uppercase tracking-[0.12em] text-[#1e5045]">{user.role}</p></div><span className="flex size-9 items-center justify-center rounded-xl bg-[#1e5045] text-[11px] font-bold text-white">{initials}</span><button className="min-h-9 rounded-lg px-2 text-[11px] font-bold text-[#58645f] hover:bg-white disabled:opacity-60" disabled={loggingOut} onClick={() => void signOut()} type="button">{loggingOut ? "Signing out…" : <><span className="hidden sm:inline">Sign out</span><span className="sm:hidden">Exit</span></>}</button></div></div></header>
+      <header className="sticky top-0 z-30 border-b border-[#e4e6df] bg-[#f4f3ed]/95 backdrop-blur"><div className="flex min-h-[78px] items-center justify-between gap-3 px-4 sm:px-7 lg:px-9"><div className="flex min-w-0 items-center gap-3"><button aria-label="Open admin navigation" className="flex size-10 items-center justify-center rounded-xl border border-[#dfe3dd] bg-white text-[#1e5045] lg:hidden" onClick={() => setSidebarOpen(true)} type="button"><Icon name="menu" size={18} /></button><div className="min-w-0"><p className="text-[9px] font-bold uppercase tracking-[0.17em] text-[#74807b]">RecallRadar <span className="px-1 text-[#c2c8c1]">/</span> Admin</p><h1 className="rr-heading mt-0.5 truncate text-[16px] font-bold text-[#1d2926] sm:text-lg">{active === "overview" ? "Overview" : active === "users" ? "User Management" : active === "system" ? "System Status" : "Supplier Batch Utilization"}</h1></div></div><div className="flex shrink-0 items-center gap-2 sm:gap-3"><div className="hidden text-right sm:block"><p className="max-w-40 truncate text-xs font-bold text-[#1d2926]">{user.name}</p><p className="mt-0.5 text-[9px] font-semibold uppercase tracking-[0.12em] text-[#1e5045]">{user.role}</p></div><span className="flex size-9 items-center justify-center rounded-xl bg-[#1e5045] text-[11px] font-bold text-white">{initials}</span><button className="min-h-9 rounded-lg px-2 text-[11px] font-bold text-[#58645f] hover:bg-white disabled:opacity-60" disabled={loggingOut} onClick={() => void signOut()} type="button">{loggingOut ? "Signing out…" : <><span className="hidden sm:inline">Sign out</span><span className="sm:hidden">Exit</span></>}</button></div></div></header>
       <main className="mx-auto w-full max-w-[1500px] space-y-6 px-4 py-6 sm:px-7 sm:py-8 lg:px-9 lg:py-9">
         {logoutError && <div className="rounded-xl border border-[#c8563e]/20 bg-[#c8563e]/[0.06] px-4 py-3 text-xs text-[#a64232]" role="alert">{logoutError}</div>}
         {active === "overview" && <>
@@ -108,8 +109,8 @@ export default function AdminPage() {
           <div className="grid gap-4 xl:grid-cols-[1.25fr_0.75fr]"><Card className="border-[#e6e7e1] bg-[#fbfbf8] p-4 sm:p-5"><div className="mb-4 flex items-start justify-between gap-3"><div><p className="text-[9px] font-bold uppercase tracking-[0.16em] text-[#74807b]">Activity feed</p><h2 className="rr-heading mt-1 text-base font-bold text-[#1d2926]">Recent activity</h2></div><span className="flex size-9 items-center justify-center rounded-xl bg-[#e8efe8] text-[#1e5045]"><Icon name="clock" size={17} /></span></div><div className="flex min-h-32 flex-col items-center justify-center rounded-xl border border-dashed border-[#dfe3dd] bg-white px-5 text-center"><span className="flex size-8 items-center justify-center rounded-lg bg-[#f0f2ec] text-[#74807b]"><Icon name="activity" size={15} /></span><p className="mt-3 text-xs font-bold text-[#1d2926]">Activity feed unavailable</p><p className="mt-1 max-w-sm text-[10px] leading-4 text-[#74807b]">Awaiting a backend activity endpoint. No events are fabricated for this view.</p></div></Card><Card className="border-[#e6e7e1] bg-[#fbfbf8] p-4 sm:p-5"><div className="mb-4"><p className="text-[9px] font-bold uppercase tracking-[0.16em] text-[#74807b]">Service health</p><h2 className="rr-heading mt-1 text-base font-bold text-[#1d2926]">Connection status</h2></div><AdminSystemStatus compact /></Card></div>
         </>}
         {active === "users" && <AdminUsersPanel />}
+        {active === "supplier-utilization" && <AdminSupplierUtilization />}
         {active === "system" && <AdminSystemStatus />}
-        {active === "settings" && <section className="space-y-4"><div><p className="text-[9px] font-bold uppercase tracking-[0.17em] text-[#74807b]">Workspace configuration</p><h2 className="rr-heading mt-1 text-xl font-bold text-[#1d2926]">Settings</h2></div><Card className="border-[#e6e7e1] bg-[#fbfbf8] py-12 text-center"><span className="mx-auto flex size-10 items-center justify-center rounded-xl bg-[#e8efe8] text-[#1e5045]"><Icon name="sparkles" size={17} /></span><p className="mt-3 text-sm font-bold text-[#1d2926]">Awaiting backend integration</p><p className="mx-auto mt-1 max-w-md text-xs leading-5 text-[#74807b]">No administrative settings APIs are available in the current project.</p></Card></section>}
       </main>
     </div>
   </div>;
